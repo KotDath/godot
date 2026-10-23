@@ -4,6 +4,7 @@ var multiline := CodeEdit.new()
 var single := LineEdit.new()
 var status := Label.new()
 var evidence: FileAccess
+var native_evidence: FileAccess
 var last_geometry := Vector3i(-1, -1, -1)
 var last_preedit := ""
 var last_preedit_selection := Vector2i(-1, -1)
@@ -17,15 +18,23 @@ func _process(_delta: float) -> void:
 	if geometry != last_geometry:
 		last_geometry = geometry
 		print("AURORA_IME_GEOMETRY ", JSON.stringify({"width": window_size.x, "height": window_size.y, "keyboard_height": height}))
+		_record_native("geometry", {"width": window_size.x, "height": window_size.y, "keyboard_height": height})
 	var preedit := DisplayServer.ime_get_text()
 	var selection := DisplayServer.ime_get_selection()
 	if preedit != last_preedit or selection != last_preedit_selection:
 		last_preedit = preedit
 		last_preedit_selection = selection
 		print("AURORA_IME_PREEDIT ", JSON.stringify({"text": preedit, "cursor": selection.x, "selection_length": selection.y}))
+		_record_native("preedit", {"text": preedit, "cursor": selection.x, "selection_length": selection.y})
+
+func _record_native(kind: String, data: Dictionary) -> void:
+	if native_evidence:
+		native_evidence.store_line(JSON.stringify({"kind": kind, "data": data}))
+		native_evidence.flush()
 
 func _ready() -> void:
 	evidence = FileAccess.open("user://ime-results.jsonl", FileAccess.WRITE)
+	native_evidence = FileAccess.open("user://ime-native.jsonl", FileAccess.WRITE)
 	var title := Label.new()
 	title.text = "Aurora IME: Unicode, multiline, selection, undo"
 	title.position = Vector2(30, 15)
@@ -89,6 +98,7 @@ func _record(event: String) -> void:
 	var line := JSON.stringify(data)
 	status.text = line
 	print("AURORA_IME ", line)
+	_record_native("state", data)
 	if evidence:
 		evidence.store_line(line)
 		evidence.flush()

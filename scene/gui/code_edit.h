@@ -320,6 +320,7 @@ private:
 	void _apply_project_settings();
 
 protected:
+	bool _ime_supports_completion() const override { return false; }
 	void _notification(int p_what);
 	static void _bind_methods();
 

@@ -475,7 +475,7 @@ public:
 	// Internal text client: commit(Dictionary operation), context() -> Dictionary.
 	// Context uses Unicode character offsets: text, cursor, anchor, origin (column, line), multiline, secret.
 	// Backends without text context support retain their existing input delivery.
-	virtual void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) {}
+	virtual void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, const Callable &p_finish, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) {}
 	virtual void window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID);
 	virtual void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID);
 	// Return false to retain the backend's existing point-based positioning.

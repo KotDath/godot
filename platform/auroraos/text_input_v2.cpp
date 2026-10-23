@@ -41,7 +41,7 @@
 
 namespace AuroraTextInput {
 namespace {
-void clear_preedit(AuroraTextInputState *s);
+void clear_preedit(AuroraTextInputState *s, bool finish = false);
 void reset_pending(AuroraTextInputState *s) {
 	s->delete_before = 0;
 	s->delete_after = 0;
@@ -65,7 +65,6 @@ void update(AuroraTextInputState *s, uint32_t reason) {
 	if (!ws) {
 		return;
 	}
-	zwp_text_input_v2_enable(s->input, ws->wl_surface);
 	const Dictionary &context = ws->ime_context;
 	const String text = context.get("text", String());
 	const int cursor = context.get("cursor", 0);
@@ -79,7 +78,11 @@ void update(AuroraTextInputState *s, uint32_t reason) {
 	if (secret) {
 		zwp_text_input_v2_set_content_type(s->input, ZWP_TEXT_INPUT_V2_CONTENT_HINT_HIDDEN_TEXT | ZWP_TEXT_INPUT_V2_CONTENT_HINT_SENSITIVE_DATA, ZWP_TEXT_INPUT_V2_CONTENT_PURPOSE_PASSWORD);
 	} else {
-		zwp_text_input_v2_set_content_type(s->input, s->hints, s->purpose);
+		uint32_t hints = s->hints;
+		if (!bool(context.get("completion", false)) || !bool(context.get("available", false))) {
+			hints &= ~(ZWP_TEXT_INPUT_V2_CONTENT_HINT_AUTO_COMPLETION | ZWP_TEXT_INPUT_V2_CONTENT_HINT_AUTO_CORRECTION);
+		}
+		zwp_text_input_v2_set_content_type(s->input, hints, s->purpose);
 	}
 	const Rect2i &rect = s->seat->ime_rect;
 	zwp_text_input_v2_set_cursor_rectangle(s->input, rect.position.x, rect.position.y, rect.size.x, rect.size.y);
@@ -93,7 +96,7 @@ void update(AuroraTextInputState *s, uint32_t reason) {
 		wl_callback_add_listener(s->reset_callback, &sync_listener, s);
 	}
 }
-void clear_preedit(AuroraTextInputState *s) {
+void clear_preedit(AuroraTextInputState *s, bool finish) {
 	if (s->window == DisplayServerEnums::INVALID_WINDOW_ID) {
 		return;
 	}
@@ -103,6 +106,9 @@ void clear_preedit(AuroraTextInputState *s) {
 	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
 	message->scoped = true;
 	message->generation = ws ? ws->ime_generation : 0;
+	if (finish && ws) {
+		message->finish_callback = ws->ime_finish_callback;
+	}
 	s->seat->wayland_thread->push_message(message);
 }
 void enter(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *surface) {
@@ -123,7 +129,7 @@ void leave(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *) {
 	if (ws) {
 		ws->ime_generation++;
 	}
-	clear_preedit(s);
+	clear_preedit(s, true);
 }
 void panel(void *data, zwp_text_input_v2 *, uint32_t state, int32_t x, int32_t y, int32_t width, int32_t height) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
@@ -283,10 +289,12 @@ bool activate(WaylandThread::SeatState *seat, DisplayServerEnums::WindowID windo
 	s->window = window;
 	s->active = active;
 	if (active) {
+		zwp_text_input_v2_enable(s->input, ws->wl_surface);
 		update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_ENTER);
 	} else {
 		ws->ime_commit_callback = Callable();
 		ws->ime_context_callback = Callable();
+		ws->ime_finish_callback = Callable();
 		ws->ime_context.clear();
 		ws->ime_generation++;
 		reset_pending(s);
@@ -351,7 +359,7 @@ void WaylandThread::aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType
 	switch (type) {
 		case KEYBOARD_TYPE_MULTILINE:
 			s->purpose = ZWP_TEXT_INPUT_V2_CONTENT_PURPOSE_NORMAL;
-			s->hints = ZWP_TEXT_INPUT_V2_CONTENT_HINT_MULTILINE;
+			s->hints = ZWP_TEXT_INPUT_V2_CONTENT_HINT_MULTILINE | ZWP_TEXT_INPUT_V2_CONTENT_HINT_AUTO_COMPLETION | ZWP_TEXT_INPUT_V2_CONTENT_HINT_AUTO_CORRECTION;
 			break;
 		case KEYBOARD_TYPE_NUMBER:
 			s->purpose = ZWP_TEXT_INPUT_V2_CONTENT_PURPOSE_NUMBER;
@@ -374,6 +382,7 @@ void WaylandThread::aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType
 			break;
 		default:
 			s->purpose = ZWP_TEXT_INPUT_V2_CONTENT_PURPOSE_NORMAL;
+			s->hints = ZWP_TEXT_INPUT_V2_CONTENT_HINT_AUTO_COMPLETION | ZWP_TEXT_INPUT_V2_CONTENT_HINT_AUTO_CORRECTION;
 	}
 	AuroraTextInput::update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_CHANGE);
 	zwp_text_input_v2_show_input_panel(s->input);

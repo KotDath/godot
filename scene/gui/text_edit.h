@@ -337,6 +337,7 @@ private:
 	void _close_ime_window();
 	Vector2i _ime_offset_position(Vector2i p_position, int p_offset) const;
 	Dictionary _ime_get_context() const;
+	void _ime_finish();
 	void _ime_commit_text(const Dictionary &p_operation);
 	void _update_ime_window_position();
 	void _update_ime_text();
@@ -699,6 +700,8 @@ private:
 	bool _clear_carets_and_selection();
 
 protected:
+	// Native word prediction must not interfere with specialized editors.
+	virtual bool _ime_supports_completion() const { return true; }
 	void _notification(int p_what);
 	static void _bind_methods();
 

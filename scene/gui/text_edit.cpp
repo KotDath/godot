@@ -885,6 +885,7 @@ void TextEdit::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_WM_WINDOW_FOCUS_OUT: {
+			_ime_finish();
 			window_has_focus = false;
 			draw_caret = false;
 			queue_redraw();
@@ -3500,6 +3501,7 @@ Dictionary TextEdit::_ime_get_context() const {
 	Dictionary context;
 	context["multiline"] = true;
 	context["available"] = selected <= 1000 && get_caret_count() == 1;
+	context["completion"] = _ime_supports_completion();
 	context["secret"] = false;
 	Vector2i start = cursor;
 	Vector2i end = cursor;
@@ -3552,6 +3554,12 @@ void TextEdit::_ime_commit_text(const Dictionary &p_operation) {
 	end_complex_operation();
 }
 
+void TextEdit::_ime_finish() {
+	if (editable && has_ime_text() && ime_metadata.has("commit_text")) {
+		apply_ime();
+	}
+}
+
 void TextEdit::_update_ime_window_position() {
 	DisplayServerEnums::WindowID wid = get_window() ? get_window()->get_window_id() : DisplayServerEnums::INVALID_WINDOW_ID;
 	if (wid == DisplayServerEnums::INVALID_WINDOW_ID || !DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_IME)) {
@@ -3562,7 +3570,7 @@ void TextEdit::_update_ime_window_position() {
 		return;
 	}
 	DisplayServer::get_singleton()->window_set_ime_active(true, wid);
-	DisplayServer::get_singleton()->window_set_ime_callbacks(callable_mp(this, &TextEdit::_ime_commit_text), callable_mp(this, &TextEdit::_ime_get_context), wid);
+	DisplayServer::get_singleton()->window_set_ime_callbacks(callable_mp(this, &TextEdit::_ime_commit_text), callable_mp(this, &TextEdit::_ime_get_context), callable_mp(this, &TextEdit::_ime_finish), wid);
 	Point2 pos = get_global_position() + get_caret_draw_pos();
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();

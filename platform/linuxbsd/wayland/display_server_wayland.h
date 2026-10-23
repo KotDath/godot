@@ -340,7 +340,7 @@ public:
 	virtual bool can_any_window_draw() const override;
 
 #ifdef AURORAOS_ENABLED
-	virtual void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
+	virtual void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, const Callable &p_finish, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
 	virtual Dictionary ime_get_preedit_metadata() const override { return ime_metadata; }
 	virtual bool window_set_ime_rect(const Rect2 &p_rect, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
 #endif

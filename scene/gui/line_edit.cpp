@@ -135,9 +135,11 @@ Dictionary LineEdit::_ime_get_context() const {
 	if (!has_focus() || !window_has_focus || !editable || !editing) {
 		return Dictionary();
 	}
+	const bool secret = pass || virtual_keyboard_type == KEYBOARD_TYPE_PASSWORD;
 	Dictionary context;
-	context["secret"] = pass;
-	context["available"] = !pass && (!selection.enabled || selection.end - selection.begin <= 1000);
+	context["secret"] = secret;
+	context["completion"] = !secret;
+	context["available"] = !secret && (!selection.enabled || selection.end - selection.begin <= 1000);
 	context["multiline"] = false;
 	// Keep both selection endpoints in the context. Oversized selections and passwords advertise no text.
 	const int cursor = selection.enabled ? (caret_column == selection.begin ? selection.begin : selection.end) : caret_column;
@@ -145,11 +147,11 @@ Dictionary LineEdit::_ime_get_context() const {
 	const int margin = MAX(0, (1000 - Math::abs(cursor - anchor)) / 2);
 	int start = MAX(0, MIN(cursor, anchor) - margin);
 	int end = MIN(text.length(), MAX(cursor, anchor) + margin);
-	if (pass || Math::abs(cursor - anchor) > 1000) {
+	if (secret || Math::abs(cursor - anchor) > 1000) {
 		start = cursor;
 		end = cursor;
 	}
-	context["text"] = pass ? String() : text.substr(start, end - start);
+	context["text"] = secret ? String() : text.substr(start, end - start);
 	context["cursor"] = cursor - start;
 	context["anchor"] = CLAMP(anchor - start, 0, end - start);
 	context["origin"] = Vector2i(start, 0);
@@ -204,13 +206,19 @@ void LineEdit::_ime_commit_text(const Dictionary &p_operation) {
 	}
 }
 
+void LineEdit::_ime_finish() {
+	if (editable && has_ime_text() && ime_metadata.has("commit_text")) {
+		apply_ime();
+	}
+}
+
 void LineEdit::_update_ime_window_position() {
 	DisplayServerEnums::WindowID wid = get_window() ? get_window()->get_window_id() : DisplayServerEnums::INVALID_WINDOW_ID;
 	if (wid == DisplayServerEnums::INVALID_WINDOW_ID || !DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_IME)) {
 		return;
 	}
 	DisplayServer::get_singleton()->window_set_ime_active(true, wid);
-	DisplayServer::get_singleton()->window_set_ime_callbacks(callable_mp(this, &LineEdit::_ime_commit_text), callable_mp(this, &LineEdit::_ime_get_context), wid);
+	DisplayServer::get_singleton()->window_set_ime_callbacks(callable_mp(this, &LineEdit::_ime_commit_text), callable_mp(this, &LineEdit::_ime_get_context), callable_mp(this, &LineEdit::_ime_finish), wid);
 	Point2 pos = Point2(get_caret_pixel_pos().x, (get_size().y + theme_cache.font->get_height(theme_cache.font_size)) / 2) + get_global_position();
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();
@@ -1455,6 +1463,7 @@ void LineEdit::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_WM_WINDOW_FOCUS_OUT: {
+			_ime_finish();
 			window_has_focus = false;
 			_validate_caret_can_draw();
 			queue_redraw();

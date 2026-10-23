@@ -1,8 +1,40 @@
-# Aurora port status — 2026-10-23
+# Aurora port status — 2026-10-24
 
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
+## Native composition focus loss and input policy (point 4, fourth part)
+
+Fixed a real device failure where leaving the app cleared an uncommitted native
+composition without applying its cached fallback. The internal text-client
+interface now also registers a finish callback. Surface leave and window focus
+loss finish native composition once; callbacks from an old client cannot close
+the next field's IME. Backends without native fallback metadata keep their existing
+focus policy. Text-input enable is sent on activation, not every context update.
+
+Normal LineEdit/TextEdit fields now advertise completion/correction when context
+is available. CodeEdit opts out through a protected C++ capability method.
+Password keyboard type hides context even if the LineEdit is not visually masked.
+
+Validation: 7 Aurora IME cases / 101 assertions and 14 TextEdit cases / 4236
+assertions pass. Linux, ARM64 and ARM32 editor builds pass; Linux Wayland renders
+the 3D GDExtension fixture and its native dependency chain returns 42. ARM32 device
+execution remains excluded. Test RPM `ru.kotdath.godotime` 4.7.2-3 passed Regular
+validation with the existing non-Silica warning, was signed with SDK test
+credentials and installed on KVADRA. `/proc/PID/exe` confirmed that release.
+The native test received preedit `q`, committed exactly `q` after backgrounding,
+cleared composition, then returned to an empty LineEdit after one Undo. CodeEdit
+also preserved `# Код 😀\n\tpass` as one commit and one Undo. Local evidence:
+`.aurora-tools/ime-evidence/ime-native3c-final.txt` and `ime-native3c-*.png`;
+the checked-in `ime_smoke/verify_composition.py` verifies the focus-loss sequence.
+
+Composition was exercised with the **stock Maliit test handler**, not a qualified
+language IME. A Qt TextInput comparator also reproduced that handler's unusual
+Q/E sequence (`Qqq` versus Godot's `qqq`), so that gesture is not a Godot-only
+failure. All three keyboard preferences were restored to their snapshots and
+temporary layout files removed. Real prediction selection, candidate placement
+after rotation, dialog avoidance and preedit replacing an existing selection
+still require work. USB and Wi-Fi device aliases refer to one physical tablet.
 
 ## IME composition and keyboard geometry (point 4, third part)
 
@@ -42,10 +74,8 @@ previous height after focus moved to the scene tree. Local screenshots are in
 all dialogs. The installed predictive keyboard produced empty preedit events
 but no visible suggestions in this configuration; non-empty composition,
 prediction/range correction, and candidate placement across rotation remain open.
-The adapter currently advertises no completion/correction hints. Investigate those
-with suitable control privacy/code-input policies. The installed Maliit also ships
-`PreeditTestHandler.qml`, which can support a controlled native composition test;
-using a test handler must be recorded separately from a real language IME.
+The later fourth part above adds completion/correction policy and records a
+controlled native composition test. Real language acceptance remains separate.
 
 One `--headless --editor --import --quit` run aborted during shutdown after reporting
 an absent EditorNode singleton from script-doc cache loading. Starting the same

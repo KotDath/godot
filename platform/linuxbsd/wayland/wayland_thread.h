@@ -183,6 +183,7 @@ public:
 		bool scoped = false;
 		uint64_t generation = 0;
 		Dictionary metadata;
+		Callable finish_callback;
 #endif
 	};
 
@@ -356,6 +357,7 @@ public:
 #ifdef AURORAOS_ENABLED
 		Callable ime_commit_callback;
 		Callable ime_context_callback;
+		Callable ime_finish_callback;
 		Dictionary ime_context;
 		uint64_t ime_generation = 0;
 		struct qt_extended_surface *qt_extended_surface = nullptr;

@@ -68,3 +68,41 @@ resizing and rotation. Dummy password input must remain absent from surrounding
 text. The C++ cases cover fallback differences, empty fallback/cancellation,
 metadata-only changes, malformed style byte boundaries, and all four rectangle
 transforms independently of installed keyboards.
+
+
+Native composition records are additionally written to `user://ime-native.jsonl`
+with `kind` (`state`, `preedit`, `geometry`) and `data`. This preserves the original
+atomic-commit verifier's input format in `ime-results.jsonl`. Installed sandbox
+paths may be visible only inside the application mount namespace; collect the
+fixture's own files before stopping it. Do not infer correctness from a keyboard
+gesture alone: compare the actual preedit received with the committed fallback.
+
+The installed Maliit `PreeditTestHandler.qml` can be selected through a temporary
+copy of the English layout and a separate layout config. Save `active_layout`,
+`enabled_layouts` and `previous_layout` first, use unique test filenames and remove
+only those files afterward. Restore active/enabled layouts, restart the keyboard,
+then restore `previous_layout` last: changing the active layout can otherwise
+asynchronously overwrite it. Verify all three values against the snapshot. Keep
+keyboard-side QML outside this runtime project and outside its application RPM.
+
+On the current KVADRA, the stock test handler produced `q`, `qq`, `qqq` after Q/E
+in Godot. A separate Qt 5.6 TextInput reference with the same layout finished as
+`Qqq` (the first key used auto-capitalization). Thus that sequence is not a valid
+Godot-only regression test. It still exercises native preedit delivery. Real
+language-IME acceptance and prediction selection must be recorded separately.
+
+For a controlled focus-loss check, start a fresh fixture process after selecting
+the test layout, activate its app card explicitly, focus the empty LineEdit and
+tap Q. Confirm a non-empty `preedit` record before swiping the application to the
+background. Its next committed state must match the **received** preedit, followed
+by an empty preedit. Return to the card and press **Undo single** once. Collect
+`ime-native.jsonl` and check:
+
+```sh
+python3 misc/aurora/ime_smoke/verify_composition.py /path/to/ime-native.jsonl
+```
+
+This scenario uses the stock test handler's matching display/fallback strings.
+Different or empty fallbacks are covered separately by the C++ tests. Restarting
+Maliit while a field is already active did not reliably re-establish the test
+handler's context on KVADRA; do not count a run without non-empty preedit as a pass.

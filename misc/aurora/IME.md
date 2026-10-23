@@ -1,8 +1,9 @@
 # Aurora IME editing context
 
 The Aurora adapter supports `text-input-unstable-v2` without introducing a new
-shared Wayland backend. The generic DisplayServer interface registers two internal
-C++ callbacks for a text client: an atomic edit and a context query. LineEdit and
+shared Wayland backend. The generic DisplayServer interface registers three internal
+C++ callbacks for a text client: an atomic edit, a context query and completion
+of a native composition before its context disappears. LineEdit and
 TextEdit supply them; CodeEdit inherits TextEdit's implementation. Other backends
 retain their existing input delivery and never query the new context callback.
 The interface is not bound to scripts or added to the GDExtension API.
@@ -15,12 +16,13 @@ It supplies a bounded context dictionary:
 - `text`: committed text around the primary caret/selection, excluding preedit;
 - `cursor`, `anchor`: Unicode character positions within that text;
 - `origin`: document position `(column, line)` of the context's first character;
-- `multiline`, `secret`, `available`: editing capabilities and privacy constraints.
+- `multiline`, `secret`, `available`, `completion`: editing capabilities and privacy constraints.
 
 At most 1000 Unicode characters are copied, so the UTF-8 representation fits the
 protocol's 4000-byte limit. TextEdit walks only the bounded document range, including
 line breaks. It does not copy a complete source file on every frame. Passwords,
-oversized selections and multiple carets advertise no surrounding text. Ordinary
+oversized selections and multiple carets advertise no surrounding text. A password keyboard type also
+sets privacy independently of whether the LineEdit draws masked characters. Ordinary
 commits still work, including normal multicaret insertion; extended context edits
 are disabled when a faithful context cannot be represented.
 
@@ -52,7 +54,10 @@ and `styles` (half-open Unicode ranges and named decorations). The fallback may
 be different from the displayed composition, or empty. Each control retains its
 own metadata until apply/cancel, so switching native clients cannot commit another
 field's text. A metadata-only update also notifies the focused control. Backends
-without metadata preserve their original apply behavior. Negative or invalid byte
+without metadata preserve their original apply behavior. Native surface leave and
+window focus loss finish the cached composition before clearing it. The finish
+callback is focus-scoped and idempotent: a delayed old client cannot close a new
+client's IME. External context changes still reset/drop stale requests. Negative or invalid byte
 cursor positions hide the caret; an omitted cursor means the end of preedit.
 
 Style ranges are converted only at UTF-8 boundaries. Controls render default and
@@ -72,6 +77,11 @@ becomes a 2000×520 overlap in Godot coordinates. Taking the untransformed heigh
 would incorrectly reserve almost the entire editor. ScriptEditor uses the rotated
 height and viewport scale to place its code viewport above the keyboard. Hiding
 the keyboard targets the active text-input window rather than assuming window 0.
+
+Normal text advertises completion/correction hints when bounded context is available.
+CodeEdit opts out through a protected C++ capability method; TextEdit retains
+natural-language prediction. Password controls never advertise completion. This
+policy changes only Aurora's context consumer, not other backends' input paths.
 
 Remaining work in roadmap point 4 includes device acceptance of composition and
 prediction, dialog avoidance, and candidate placement through orientation changes.

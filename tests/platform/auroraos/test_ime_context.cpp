@@ -36,6 +36,7 @@
 TEST_FORCE_LINK(test_ime_context)
 
 #ifndef ADVANCED_GUI_DISABLED
+#include "scene/gui/code_edit.h"
 #include "scene/gui/line_edit.h"
 #include "scene/gui/text_edit.h"
 #include "scene/main/scene_tree.h"
@@ -202,7 +203,17 @@ TEST_CASE("[SceneTree][AuroraIME] LineEdit context and atomic edits") {
 
 	line->set_secret(true);
 	CHECK(String(ime.display->get_ime_context()["text"]).is_empty());
+	CHECK_FALSE(bool(ime.display->get_ime_context()["completion"]));
 	line->set_secret(false);
+	CHECK(bool(ime.display->get_ime_context()["completion"]));
+	line->set_virtual_keyboard_type(LineEdit::KEYBOARD_TYPE_PASSWORD);
+	CHECK(String(ime.display->get_ime_context()["text"]).is_empty());
+	CHECK(bool(ime.display->get_ime_context()["secret"]));
+	CHECK_FALSE(bool(ime.display->get_ime_context()["completion"]));
+	CHECK_FALSE(bool(ime.display->get_ime_context()["available"]));
+	line->set_virtual_keyboard_type(LineEdit::KEYBOARD_TYPE_DEFAULT);
+	CHECK_FALSE(bool(ime.display->get_ime_context()["secret"]));
+	CHECK(bool(ime.display->get_ime_context()["completion"]));
 	line->set_max_length(4);
 	line->set_text("abc");
 	line->select_all();
@@ -218,6 +229,66 @@ TEST_CASE("[SceneTree][AuroraIME] LineEdit context and atomic edits") {
 	memdelete(line);
 }
 
+TEST_CASE("[SceneTree][AuroraIME] Surface leave finishes native preedit once") {
+	IMEScope ime;
+	LineEdit *line = memnew(LineEdit);
+	TextEdit *edit = memnew(TextEdit);
+	SceneTree::get_singleton()->get_root()->add_child(line);
+	SceneTree::get_singleton()->get_root()->add_child(edit);
+	line->grab_focus();
+	line->edit();
+	Dictionary metadata;
+	metadata["commit_text"] = U"готово 😀";
+	ime.display->set_ime_preedit("pending", Vector2i(7, 0), metadata);
+	line->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	const Callable old_finish = ime.display->get_ime_finish_callback();
+	REQUIRE(old_finish.is_valid());
+	old_finish.call();
+	CHECK(line->get_text() == String(U"готово 😀"));
+	CHECK_FALSE(line->has_ime_text());
+	old_finish.call();
+	CHECK(line->get_text() == String(U"готово 😀"));
+	line->undo();
+	CHECK(line->get_text().is_empty());
+
+	line->set_caret_column(0);
+	ime.display->set_ime_preedit("pending", Vector2i(7, 0), metadata);
+	line->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	line->notification(Control::NOTIFICATION_WM_WINDOW_FOCUS_OUT);
+	CHECK(line->get_text() == String(U"готово 😀"));
+	CHECK_FALSE(line->has_ime_text());
+	line->notification(Control::NOTIFICATION_WM_WINDOW_FOCUS_IN);
+	line->undo();
+	CHECK(line->get_text().is_empty());
+
+	// Backends without native fallback metadata keep their existing focus policy.
+	ime.display->set_ime_preedit("legacy", Vector2i(6, 0), Dictionary());
+	line->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	line->notification(Control::NOTIFICATION_WM_WINDOW_FOCUS_OUT);
+	CHECK(line->has_ime_text());
+	CHECK(line->get_text().is_empty());
+	line->notification(Control::NOTIFICATION_WM_WINDOW_FOCUS_IN);
+	line->cancel_ime();
+
+	edit->grab_focus();
+	edit->set_caret_column(0);
+	metadata["commit_text"] = U"строка\n\t😀";
+	ime.display->set_ime_preedit("pending", Vector2i(7, 0), metadata);
+	edit->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	const Callable current_commit = ime.display->get_ime_commit_callback();
+	old_finish.call(); // A delayed old client's finish must not deactivate the new one.
+	CHECK(ime.display->get_ime_commit_callback() == current_commit);
+	CHECK(edit->has_ime_text());
+	edit->notification(Control::NOTIFICATION_WM_WINDOW_FOCUS_OUT);
+	CHECK(edit->get_text() == String(U"строка\n\t😀"));
+	CHECK_FALSE(edit->has_ime_text());
+	edit->notification(Control::NOTIFICATION_WM_WINDOW_FOCUS_IN);
+	edit->undo();
+	CHECK(edit->get_text().is_empty());
+	memdelete(line);
+	memdelete(edit);
+}
+
 TEST_CASE("[SceneTree][AuroraIME] TextEdit context across lines") {
 	IMEScope ime;
 	TextEdit *edit = memnew(TextEdit);
@@ -227,6 +298,7 @@ TEST_CASE("[SceneTree][AuroraIME] TextEdit context across lines") {
 	edit->set_caret_line(1);
 	edit->set_caret_column(2);
 	REQUIRE_FALSE(ime.display->get_ime_context().is_empty());
+	CHECK(bool(ime.display->get_ime_context()["completion"]));
 	ime.commit(U"ё", 4, 2);
 	CHECK(edit->get_text() == String(U"head\nАё\nend"));
 	edit->undo();
@@ -261,6 +333,23 @@ TEST_CASE("[SceneTree][AuroraIME] TextEdit context across lines") {
 	CHECK(String(bounded["text"]).utf8().length() <= 4000);
 	edit->select(0, 0, 9999, 0);
 	CHECK(String(ime.display->get_ime_context()["text"]).is_empty());
+	memdelete(edit);
+}
+
+TEST_CASE("[SceneTree][AuroraIME] CodeEdit opts out of native word prediction") {
+	IMEScope ime;
+	CodeEdit *edit = memnew(CodeEdit);
+	SceneTree::get_singleton()->get_root()->add_child(edit);
+	edit->set_text("extends Node");
+	edit->grab_focus();
+	edit->set_caret_column(7);
+	REQUIRE_FALSE(ime.display->get_ime_context().is_empty());
+	CHECK_FALSE(bool(ime.display->get_ime_context()["completion"]));
+	// Disabling prediction must not disable ordinary IME commits.
+	ime.commit(U"\n# Русский 😀");
+	CHECK(edit->get_text().contains(String(U"\n# Русский 😀")));
+	edit->undo();
+	CHECK(edit->get_text() == "extends Node");
 	memdelete(edit);
 }
 #endif

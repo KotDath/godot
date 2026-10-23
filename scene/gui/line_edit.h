@@ -232,6 +232,7 @@ private:
 
 	void _close_ime_window();
 	Dictionary _ime_get_context() const;
+	void _ime_finish();
 	void _ime_commit_text(const Dictionary &p_operation);
 	void _update_ime_window_position();
 

@@ -48,6 +48,7 @@ private:
 	bool ime_enabled = false;
 	Callable ime_commit_callback;
 	Callable ime_context_callback;
+	Callable ime_finish_callback;
 	String ime_text;
 	Vector2i ime_selection;
 	Dictionary ime_metadata;
@@ -69,18 +70,21 @@ public:
 		ime_enabled = p_enabled;
 		ime_commit_callback = Callable();
 		ime_context_callback = Callable();
+		ime_finish_callback = Callable();
 		ime_text = String();
 		ime_selection = Vector2i();
 		ime_metadata = Dictionary();
 	}
-	void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {
+	void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, const Callable &p_finish, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {
 		ime_commit_callback = p_commit;
 		ime_context_callback = p_context;
+		ime_finish_callback = p_finish;
 	}
 	void window_set_ime_active(bool p_active, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {
 		if (!p_active) {
 			ime_commit_callback = Callable();
 			ime_context_callback = Callable();
+			ime_finish_callback = Callable();
 		}
 	}
 	void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {}
@@ -94,6 +98,7 @@ public:
 	}
 	Dictionary get_ime_context() const { return ime_context_callback.is_valid() ? Dictionary(ime_context_callback.call()) : Dictionary(); }
 	Callable get_ime_commit_callback() const { return ime_commit_callback; }
+	Callable get_ime_finish_callback() const { return ime_finish_callback; }
 	void commit_ime(const Dictionary &p_operation) {
 		if (ime_commit_callback.is_valid()) {
 			ime_commit_callback.call(p_operation);

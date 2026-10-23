@@ -1464,13 +1464,14 @@ bool DisplayServerWayland::can_any_window_draw() const {
 }
 
 #ifdef AURORAOS_ENABLED
-void DisplayServerWayland::window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, const Callable &p_finish, DisplayServerEnums::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 	auto *ws = wayland_thread.window_get_state(p_window_id);
 	ERR_FAIL_NULL(ws);
-	if (ws->ime_commit_callback != p_commit) {
+	if (ws->ime_commit_callback != p_commit || ws->ime_context_callback != p_context || ws->ime_finish_callback != p_finish) {
 		ws->ime_commit_callback = p_commit;
 		ws->ime_context_callback = p_context;
+		ws->ime_finish_callback = p_finish;
 		ws->ime_context.clear();
 		ws->ime_generation++;
 		_aurora_update_ime_context(false, p_window_id);
@@ -2238,6 +2239,18 @@ void DisplayServerWayland::process_events() {
 #ifdef AURORAOS_ENABLED
 			if (ime_update_msg->scoped) {
 				Input::get_singleton()->flush_buffered_events();
+				MutexLock mutex_lock(wayland_thread.mutex);
+				if (!ime_update_msg->finish_callback.is_null()) {
+					_aurora_update_ime_context(false, ime_update_msg->id);
+				}
+				auto *ws = wayland_thread.window_get_state(ime_update_msg->id);
+				if (!ws || ws->ime_generation != ime_update_msg->generation) {
+					continue;
+				}
+			}
+			if (ime_update_msg->finish_callback.is_valid()) {
+				ime_update_msg->finish_callback.call();
+				MutexLock mutex_lock(wayland_thread.mutex);
 				auto *ws = wayland_thread.window_get_state(ime_update_msg->id);
 				if (!ws || ws->ime_generation != ime_update_msg->generation) {
 					continue;
