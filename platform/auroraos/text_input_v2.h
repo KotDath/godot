@@ -37,7 +37,15 @@ struct AuroraTextInputState {
 	DisplayServerEnums::WindowID window = DisplayServerEnums::INVALID_WINDOW_ID;
 	uint32_t serial = 0;
 	bool active = false;
-	int preedit_cursor = 0;
+	struct wl_callback *reset_callback = nullptr;
+	bool entered = false;
+	int preedit_cursor = INT32_MAX;
+	uint32_t delete_before = 0;
+	uint32_t delete_after = 0;
+	bool move_cursor = false;
+	int32_t commit_cursor = 0;
+	int32_t commit_anchor = 0;
+	Vector2i preedit_highlight = Vector2i(-1, 0);
 	int panel_height = 0;
 	uint32_t purpose = 0;
 	uint32_t hints = 0;

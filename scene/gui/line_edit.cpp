@@ -130,24 +130,74 @@ void LineEdit::_close_ime_window() {
 	DisplayServer::get_singleton()->window_set_ime_active(false, wid);
 }
 
-void LineEdit::_ime_commit_text(const String &p_text) {
+Dictionary LineEdit::_ime_get_context() const {
+	if (!has_focus() || !window_has_focus || !editable || !editing) {
+		return Dictionary();
+	}
+	Dictionary context;
+	context["secret"] = pass;
+	context["available"] = !pass && (!selection.enabled || selection.end - selection.begin <= 1000);
+	context["multiline"] = false;
+	// Keep both selection endpoints in the context. Oversized selections and passwords advertise no text.
+	const int cursor = selection.enabled ? (caret_column == selection.begin ? selection.begin : selection.end) : caret_column;
+	const int anchor = selection.enabled ? (cursor == selection.begin ? selection.end : selection.begin) : cursor;
+	const int margin = MAX(0, (1000 - Math::abs(cursor - anchor)) / 2);
+	int start = MAX(0, MIN(cursor, anchor) - margin);
+	int end = MIN(text.length(), MAX(cursor, anchor) + margin);
+	if (pass || Math::abs(cursor - anchor) > 1000) {
+		start = cursor;
+		end = cursor;
+	}
+	context["text"] = pass ? String() : text.substr(start, end - start);
+	context["cursor"] = cursor - start;
+	context["anchor"] = CLAMP(anchor - start, 0, end - start);
+	context["origin"] = Vector2i(start, 0);
+	return context;
+}
+
+void LineEdit::_ime_commit_text(const Dictionary &p_operation) {
 	if (!has_focus() || !window_has_focus || !editable || !editing) {
 		return;
 	}
-	const String committed = p_text.strip_escapes();
-	if (committed.is_empty()) {
+	const String committed = String(p_operation.get("text", String())).strip_escapes();
+	if (p_operation.has("context") && _ime_get_context() != Dictionary(p_operation["context"])) {
+		return; // The cursor, selection or text changed after this request was produced.
+	}
+	if (committed.is_empty() && !p_operation.has("range") && !p_operation.has("selection")) {
 		return;
 	}
 	const String previous = text;
-	// Replace the selection and insert as one undo operation, including equal-length replacements.
-	if (selection.enabled) {
+	const Dictionary context = p_operation.get("context", Dictionary());
+	const Vector2i origin = context.get("origin", Vector2i());
+	if (p_operation.has("range")) {
+		const Vector2i range = p_operation["range"];
+		const int start = origin.x + range.x;
+		const int end = origin.x + range.y;
+		ERR_FAIL_COND(start < 0 || end < start || end > text.length());
+		text = text.left(start) + text.substr(end);
+		deselect();
+		_shape();
+		set_caret_column(start);
+	} else if (!committed.is_empty() && selection.enabled) {
 		const int start = selection.begin;
 		text = text.left(start) + text.substr(selection.end);
 		deselect();
 		_shape();
 		set_caret_column(start);
 	}
-	insert_text_at_caret(committed);
+	if (!committed.is_empty()) {
+		insert_text_at_caret(committed);
+	}
+	if (p_operation.has("selection")) {
+		const Vector2i positions = p_operation["selection"];
+		const int cursor = CLAMP(origin.x + positions.x, 0, text.length());
+		const int anchor = CLAMP(origin.x + positions.y, 0, text.length());
+		deselect();
+		if (cursor != anchor) {
+			select(MIN(cursor, anchor), MAX(cursor, anchor));
+		}
+		set_caret_column(cursor);
+	}
 	if (text != previous) {
 		_text_changed();
 	}
@@ -159,7 +209,7 @@ void LineEdit::_update_ime_window_position() {
 		return;
 	}
 	DisplayServer::get_singleton()->window_set_ime_active(true, wid);
-	DisplayServer::get_singleton()->window_set_ime_commit_callback(callable_mp(this, &LineEdit::_ime_commit_text), wid);
+	DisplayServer::get_singleton()->window_set_ime_callbacks(callable_mp(this, &LineEdit::_ime_commit_text), callable_mp(this, &LineEdit::_ime_get_context), wid);
 	Point2 pos = Point2(get_caret_pixel_pos().x, (get_size().y + theme_cache.font->get_height(theme_cache.font_size)) / 2) + get_global_position();
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();

@@ -20,16 +20,16 @@ func _ready() -> void:
 	single.size = Vector2(1850, 65)
 	single.add_theme_font_size_override("font_size", 30)
 	add_child(single)
-	var actions := ["Reset", "Select multiline", "Undo multiline", "Select single", "Undo single", "Read only"]
+	var actions := ["Reset", "Select multiline", "Undo multiline", "Select single", "Undo single", "Read only", "Password", "Move caret"]
 	for index in actions.size():
 		var button := Button.new()
 		button.text = actions[index]
-		button.position = Vector2(30 + index * 300, 480)
+		button.position = Vector2(30 + (index % 6) * 300, 480 + floori(index / 6.0) * 80)
 		button.size = Vector2(285, 65)
 		button.focus_mode = Control.FOCUS_NONE
 		button.pressed.connect(_action.bind(index))
 		add_child(button)
-	status.position = Vector2(30, 570)
+	status.position = Vector2(650, 575)
 	status.size = Vector2(1850, 60)
 	add_child(status)
 	multiline.text_changed.connect(_record.bind("multiline"))
@@ -41,6 +41,7 @@ func _action(index: int) -> void:
 		0:
 			multiline.editable = true
 			single.editable = true
+			single.secret = false
 			multiline.text = ""
 			single.text = ""
 			multiline.clear_undo_history()
@@ -58,10 +59,14 @@ func _action(index: int) -> void:
 		5:
 			multiline.editable = false
 			single.editable = false
+		6:
+			single.secret = not single.secret
+		7:
+			single.caret_column = 1
 	_record("action_%d" % index)
 
 func _record(event: String) -> void:
-	var data := {"event": event, "multiline": multiline.text, "single": single.text}
+	var data := {"event": event, "multiline": multiline.text, "single": single.text, "secret": single.secret}
 	var line := JSON.stringify(data)
 	status.text = line
 	print("AURORA_IME ", line)

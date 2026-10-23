@@ -230,7 +230,8 @@ private:
 	} theme_cache;
 
 	void _close_ime_window();
-	void _ime_commit_text(const String &p_text);
+	Dictionary _ime_get_context() const;
+	void _ime_commit_text(const Dictionary &p_operation);
 	void _update_ime_window_position();
 
 	void _clear_undo_stack();

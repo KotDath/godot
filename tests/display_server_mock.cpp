@@ -63,6 +63,8 @@ void DisplayServerMock::_send_window_event(DisplayServerEnums::WindowEvent p_eve
 
 bool DisplayServerMock::has_feature(DisplayServerEnums::Feature p_feature) const {
 	switch (p_feature) {
+		case DisplayServerEnums::FEATURE_IME:
+			return ime_enabled;
 		case DisplayServerEnums::FEATURE_MOUSE:
 		case DisplayServerEnums::FEATURE_CURSOR_SHAPE:
 		case DisplayServerEnums::FEATURE_CLIPBOARD:

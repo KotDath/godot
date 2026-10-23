@@ -470,8 +470,10 @@ public:
 
 	virtual bool can_any_window_draw() const = 0;
 
-	// Receives an atomic IME commit on the main thread. Unsupported backends keep key-event delivery.
-	virtual void window_set_ime_commit_callback(const Callable &p_callback, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) {}
+	// Internal text client: commit(Dictionary operation), context() -> Dictionary.
+	// Context uses Unicode character offsets: text, cursor, anchor, origin (column, line), multiline, secret.
+	// Backends without text context support retain their existing input delivery.
+	virtual void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) {}
 	virtual void window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID);
 	virtual void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID);
 

@@ -334,7 +334,9 @@ private:
 	void _update_caches(bool p_invalidate_all = false);
 
 	void _close_ime_window();
-	void _ime_commit_text(const String &p_text);
+	Vector2i _ime_offset_position(Vector2i p_position, int p_offset) const;
+	Dictionary _ime_get_context() const;
+	void _ime_commit_text(const Dictionary &p_operation);
 	void _update_ime_window_position();
 	void _update_ime_text();
 

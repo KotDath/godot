@@ -45,6 +45,10 @@ private:
 	bool window_over = false;
 	Callable event_callback;
 
+	bool ime_enabled = false;
+	Callable ime_commit_callback;
+	Callable ime_context_callback;
+
 	String clipboard_text;
 	String primary_clipboard_text;
 
@@ -57,6 +61,30 @@ private:
 
 public:
 	bool has_feature(DisplayServerEnums::Feature p_feature) const override;
+
+	void set_ime_enabled(bool p_enabled) {
+		ime_enabled = p_enabled;
+		ime_commit_callback = Callable();
+		ime_context_callback = Callable();
+	}
+	void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {
+		ime_commit_callback = p_commit;
+		ime_context_callback = p_context;
+	}
+	void window_set_ime_active(bool p_active, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {
+		if (!p_active) {
+			ime_commit_callback = Callable();
+			ime_context_callback = Callable();
+		}
+	}
+	void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) override {}
+	Dictionary get_ime_context() const { return ime_context_callback.is_valid() ? Dictionary(ime_context_callback.call()) : Dictionary(); }
+	Callable get_ime_commit_callback() const { return ime_commit_callback; }
+	void commit_ime(const Dictionary &p_operation) {
+		if (ime_commit_callback.is_valid()) {
+			ime_commit_callback.call(p_operation);
+		}
+	}
 
 	String get_name() const override { return "mock"; }
 

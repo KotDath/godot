@@ -30,6 +30,7 @@
 
 #include "text_input_v2.h"
 
+#include "ime_context.h"
 #include "protocol/text_input_v2.gen.h"
 
 #include "core/input/input_event.h"
@@ -39,6 +40,22 @@
 
 namespace AuroraTextInput {
 namespace {
+void clear_preedit(AuroraTextInputState *s);
+void reset_pending(AuroraTextInputState *s) {
+	s->delete_before = 0;
+	s->delete_after = 0;
+	s->move_cursor = false;
+	s->commit_cursor = 0;
+	s->commit_anchor = 0;
+	s->preedit_cursor = INT32_MAX;
+	s->preedit_highlight = Vector2i(-1, 0);
+}
+void synchronized(void *data, wl_callback *callback, uint32_t) {
+	auto *s = static_cast<AuroraTextInputState *>(data);
+	wl_callback_destroy(callback);
+	s->reset_callback = nullptr;
+}
+const wl_callback_listener sync_listener = { synchronized };
 void update(AuroraTextInputState *s, uint32_t reason) {
 	if (!s->active) {
 		return;
@@ -48,13 +65,32 @@ void update(AuroraTextInputState *s, uint32_t reason) {
 		return;
 	}
 	zwp_text_input_v2_enable(s->input, ws->wl_surface);
-	zwp_text_input_v2_set_content_type(s->input, s->hints, s->purpose);
-	// Godot's IME API does not provide continuously synchronized surrounding
-	// text. Do not advertise stale context to the input method.
-	zwp_text_input_v2_set_surrounding_text(s->input, "", 0, 0);
+	const Dictionary &context = ws->ime_context;
+	const String text = context.get("text", String());
+	const int cursor = context.get("cursor", 0);
+	const int anchor = context.get("anchor", 0);
+	const bool secret = context.get("secret", false);
+	if (!secret && text.utf8().length() <= 4000 && cursor >= 0 && anchor >= 0 && cursor <= text.length() && anchor <= text.length()) {
+		zwp_text_input_v2_set_surrounding_text(s->input, text.utf8().get_data(), AuroraIME::bytes_at_character(text, cursor), AuroraIME::bytes_at_character(text, anchor));
+	} else {
+		zwp_text_input_v2_set_surrounding_text(s->input, "", 0, 0);
+	}
+	if (secret) {
+		zwp_text_input_v2_set_content_type(s->input, ZWP_TEXT_INPUT_V2_CONTENT_HINT_HIDDEN_TEXT | ZWP_TEXT_INPUT_V2_CONTENT_HINT_SENSITIVE_DATA, ZWP_TEXT_INPUT_V2_CONTENT_PURPOSE_PASSWORD);
+	} else {
+		zwp_text_input_v2_set_content_type(s->input, s->hints, s->purpose);
+	}
 	const Rect2i &rect = s->seat->ime_rect;
 	zwp_text_input_v2_set_cursor_rectangle(s->input, rect.position.x, rect.position.y, rect.size.x, rect.size.y);
 	zwp_text_input_v2_update_state(s->input, s->serial, reason);
+	if (reason != ZWP_TEXT_INPUT_V2_UPDATE_STATE_CHANGE) {
+		reset_pending(s);
+		if (s->reset_callback) {
+			wl_callback_destroy(s->reset_callback);
+		}
+		s->reset_callback = wl_display_sync(s->seat->wayland_thread->get_wl_display());
+		wl_callback_add_listener(s->reset_callback, &sync_listener, s);
+	}
 }
 void clear_preedit(AuroraTextInputState *s) {
 	if (s->window == DisplayServerEnums::INVALID_WINDOW_ID) {
@@ -63,11 +99,15 @@ void clear_preedit(AuroraTextInputState *s) {
 	Ref<WaylandThread::IMEUpdateEventMessage> message;
 	message.instantiate();
 	message->id = s->window;
+	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
+	message->scoped = true;
+	message->generation = ws ? ws->ime_generation : 0;
 	s->seat->wayland_thread->push_message(message);
 }
 void enter(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *surface) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
 	s->serial = serial;
+	s->entered = true;
 	if (s->active) {
 		update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_FULL);
 	}
@@ -76,33 +116,62 @@ void leave(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
 	s->serial = serial;
 	s->panel_height = 0;
+	s->entered = false;
+	reset_pending(s);
+	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
+	if (ws) {
+		ws->ime_generation++;
+	}
 	clear_preedit(s);
 }
 void panel(void *data, zwp_text_input_v2 *, uint32_t state, int32_t, int32_t, int32_t, int32_t height) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
 	s->panel_height = state ? MAX(0, height) : 0;
 }
-void preedit(void *data, zwp_text_input_v2 *, const char *text, const char *) {
+void commit(void *data, zwp_text_input_v2 *, const char *text);
+void preedit(void *data, zwp_text_input_v2 *input, const char *text, const char *) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
-	if (!s->active) {
+	if (!s->active || !s->entered || s->reset_callback) {
+		reset_pending(s);
 		return;
+	}
+	const int pending_cursor = s->preedit_cursor;
+	const Vector2i pending_highlight = s->preedit_highlight;
+	if (s->delete_before || s->delete_after) {
+		s->move_cursor = false;
+		commit(data, input, "");
 	}
 	Ref<WaylandThread::IMEUpdateEventMessage> message;
 	message.instantiate();
 	message->id = s->window;
 	message->text = String::utf8(text);
-	int bytes = CLAMP(s->preedit_cursor, 0, int(strlen(text)));
-	message->selection = Vector2i(String::utf8(text, bytes).length(), 0);
+	const int cursor = pending_cursor == INT32_MAX ? message->text.length() : AuroraIME::character_at_byte(message->text, pending_cursor);
+	message->selection = Vector2i(MAX(0, cursor), 0);
+	if (pending_highlight.x >= 0) {
+		const int from = AuroraIME::character_at_byte(message->text, pending_highlight.x);
+		const int to = AuroraIME::character_at_byte(message->text, int64_t(pending_highlight.x) + pending_highlight.y);
+		if (from >= 0 && to >= from) {
+			message->selection = Vector2i(from, to - from);
+		}
+	}
+	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
+	message->scoped = true;
+	message->generation = ws ? ws->ime_generation : 0;
 	s->seat->wayland_thread->push_message(message);
-	s->preedit_cursor = 0;
+	reset_pending(s);
 }
-void styling(void *, zwp_text_input_v2 *, uint32_t, uint32_t, uint32_t) {}
+void styling(void *data, zwp_text_input_v2 *, uint32_t index, uint32_t length, uint32_t style) {
+	if ((style == ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_HIGHLIGHT || style == ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_SELECTION) && index <= INT32_MAX && length <= INT32_MAX) {
+		static_cast<AuroraTextInputState *>(data)->preedit_highlight = Vector2i(index, length);
+	}
+}
 void preedit_cursor(void *data, zwp_text_input_v2 *, int32_t index) {
 	static_cast<AuroraTextInputState *>(data)->preedit_cursor = index;
 }
 void commit(void *data, zwp_text_input_v2 *, const char *text) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
-	if (!s->active) {
+	if (!s->active || !s->entered || s->reset_callback) {
+		reset_pending(s);
 		return;
 	}
 	Ref<WaylandThread::IMECommitEventMessage> message;
@@ -114,17 +183,30 @@ void commit(void *data, zwp_text_input_v2 *, const char *text) {
 		message->callback = ws->ime_commit_callback;
 		message->generation = ws->ime_generation;
 		message->atomic = !message->callback.is_null();
+		if (message->atomic && !AuroraIME::operation(ws->ime_context, message->text, s->delete_before, s->delete_after, s->move_cursor, s->commit_cursor, s->commit_anchor, message->operation)) {
+			update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_RESET);
+			clear_preedit(s);
+			return;
+		}
 	}
 	s->seat->wayland_thread->push_message(message);
+	reset_pending(s);
 }
-void cursor_position(void *, zwp_text_input_v2 *, int32_t, int32_t) {}
-void delete_surrounding(void *, zwp_text_input_v2 *, uint32_t, uint32_t) {
-	// No surrounding text was advertised. Backspace/Delete arrive as keysyms.
+void cursor_position(void *data, zwp_text_input_v2 *, int32_t cursor, int32_t anchor) {
+	auto *s = static_cast<AuroraTextInputState *>(data);
+	s->move_cursor = true;
+	s->commit_cursor = cursor;
+	s->commit_anchor = anchor;
+}
+void delete_surrounding(void *data, zwp_text_input_v2 *, uint32_t before, uint32_t after) {
+	auto *s = static_cast<AuroraTextInputState *>(data);
+	s->delete_before = before;
+	s->delete_after = after;
 }
 void modifiers(void *, zwp_text_input_v2 *, wl_array *) {}
 void keysym(void *data, zwp_text_input_v2 *, uint32_t, uint32_t sym, uint32_t state, uint32_t) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
-	if (!s->active) {
+	if (!s->active || !s->entered || s->reset_callback) {
 		return;
 	}
 	Ref<InputEventKey> event;
@@ -161,6 +243,9 @@ void attach(WaylandThread::SeatState *seat) {
 void detach(WaylandThread::SeatState *seat) {
 	if (!seat->aurora_text_input) {
 		return;
+	}
+	if (seat->aurora_text_input->reset_callback) {
+		wl_callback_destroy(seat->aurora_text_input->reset_callback);
 	}
 	zwp_text_input_v2_destroy(seat->aurora_text_input->input);
 	memdelete(seat->aurora_text_input);
@@ -207,7 +292,10 @@ bool activate(WaylandThread::SeatState *seat, DisplayServerEnums::WindowID windo
 		update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_ENTER);
 	} else {
 		ws->ime_commit_callback = Callable();
+		ws->ime_context_callback = Callable();
+		ws->ime_context.clear();
 		ws->ime_generation++;
+		reset_pending(s);
 		zwp_text_input_v2_hide_input_panel(s->input);
 		zwp_text_input_v2_disable(s->input, ws->wl_surface);
 		s->panel_height = 0;
@@ -226,6 +314,27 @@ bool cursor(WaylandThread::SeatState *seat, const Point2i &position, DisplayServ
 	return true;
 }
 } //namespace AuroraTextInput
+
+void WaylandThread::aurora_set_ime_context(DisplayServerEnums::WindowID p_window, const Dictionary &p_context, bool p_reset) {
+	auto *ws = window_get_state(p_window);
+	if (!ws) {
+		return;
+	}
+	ws->ime_context = p_context.duplicate();
+	auto *seat = wl_seat_get_seat_state(wl_seat_current);
+	if (!seat || !seat->aurora_text_input || seat->wp_text_input) {
+		return;
+	}
+	auto *s = seat->aurora_text_input;
+	if (!s->active || s->window != p_window) {
+		return;
+	}
+	if (p_reset) {
+		ws->ime_generation++;
+		AuroraTextInput::clear_preedit(s);
+	}
+	AuroraTextInput::update(s, p_reset ? ZWP_TEXT_INPUT_V2_UPDATE_STATE_RESET : ZWP_TEXT_INPUT_V2_UPDATE_STATE_CHANGE);
+}
 
 void WaylandThread::aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType type) {
 	auto *seat = wl_seat_get_seat_state(wl_seat_current);

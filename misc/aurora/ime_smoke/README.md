@@ -29,3 +29,22 @@ python3 misc/aurora/ime_smoke/verify.py /path/to/ime-results.jsonl
 
 Emoji codepoints are checked in the log. Missing glyphs in the default font are
 independent of IME text preservation.
+
+## Surrounding text and password checks
+
+Start the fixture with `WAYLAND_DEBUG=client` and capture stdout/stderr. Enter
+`А😀Б ёж` using `audb text --delay 50`: this waits for Maliit to acknowledge the
+text and cursor after every character. Use **Move caret**, insert more Unicode,
+then enable **Password** and insert dummy text with delay 0 (password context is
+intentionally hidden, so per-character context acknowledgement is unavailable).
+Disable Password, focus CodeEdit, and enter multiline text with a tab.
+
+```sh
+python3 misc/aurora/ime_smoke/verify_context.py /path/to/wayland-trace.log.gz
+```
+
+The verifier accepts plain/gzipped traces from this controlled fixture. It checks
+the 4000-byte limit, UTF-8 cursor/anchor boundaries, multiline context, and that
+password-mode requests contain no surrounding text or cursor positions. The
+**Reset** button restores editable, non-secret fields. For the original 13-step
+verifier, save the log immediately after Read only, before starting more scenarios.

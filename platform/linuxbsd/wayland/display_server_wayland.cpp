@@ -1464,13 +1464,32 @@ bool DisplayServerWayland::can_any_window_draw() const {
 }
 
 #ifdef AURORAOS_ENABLED
-void DisplayServerWayland::window_set_ime_commit_callback(const Callable &p_callback, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 	auto *ws = wayland_thread.window_get_state(p_window_id);
 	ERR_FAIL_NULL(ws);
-	if (ws->ime_commit_callback != p_callback) {
-		ws->ime_commit_callback = p_callback;
+	if (ws->ime_commit_callback != p_commit) {
+		ws->ime_commit_callback = p_commit;
+		ws->ime_context_callback = p_context;
+		ws->ime_context.clear();
 		ws->ime_generation++;
+		_aurora_update_ime_context(false, p_window_id);
+	}
+}
+
+void DisplayServerWayland::_aurora_update_ime_context(bool p_from_ime, DisplayServerEnums::WindowID p_window) {
+	for (const KeyValue<DisplayServerEnums::WindowID, WindowData> &entry : windows) {
+		if (p_window != DisplayServerEnums::INVALID_WINDOW_ID && entry.key != p_window) {
+			continue;
+		}
+		auto *ws = wayland_thread.window_get_state(entry.key);
+		if (!ws || !ws->ime_context_callback.is_valid()) {
+			continue;
+		}
+		const Dictionary context = ws->ime_context_callback.call();
+		if (context != ws->ime_context) {
+			wayland_thread.aurora_set_ime_context(entry.key, context, !p_from_ime);
+		}
 	}
 }
 #endif
@@ -2171,10 +2190,19 @@ void DisplayServerWayland::process_events() {
 					current = ws && ws->ime_generation == ime_commit_msg->generation;
 				}
 				if (current && ime_commit_msg->callback.is_valid()) {
+					if (ime_commit_msg->operation.has("context")) {
+						auto *ws = wayland_thread.window_get_state(ime_commit_msg->id);
+						const Dictionary context = ws->ime_context_callback.call();
+						if (context != Dictionary(ime_commit_msg->operation["context"])) {
+							wayland_thread.aurora_set_ime_context(ime_commit_msg->id, context, true);
+							continue;
+						}
+					}
 					ime_text = String();
 					ime_selection = Vector2i();
 					OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
-					ime_commit_msg->callback.call(ime_commit_msg->text);
+					ime_commit_msg->callback.call(ime_commit_msg->operation);
+					_aurora_update_ime_context(true, ime_commit_msg->id);
 				}
 				continue;
 			}
@@ -2203,11 +2231,23 @@ void DisplayServerWayland::process_events() {
 
 		Ref<WaylandThread::IMEUpdateEventMessage> ime_update_msg = msg;
 		if (ime_update_msg.is_valid()) {
+#ifdef AURORAOS_ENABLED
+			if (ime_update_msg->scoped) {
+				Input::get_singleton()->flush_buffered_events();
+				auto *ws = wayland_thread.window_get_state(ime_update_msg->id);
+				if (!ws || ws->ime_generation != ime_update_msg->generation) {
+					continue;
+				}
+			}
+#endif
 			if (ime_text != ime_update_msg->text || ime_selection != ime_update_msg->selection) {
 				ime_text = ime_update_msg->text;
 				ime_selection = ime_update_msg->selection;
 
 				OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+#ifdef AURORAOS_ENABLED
+				_aurora_update_ime_context(true, ime_update_msg->id);
+#endif
 			}
 			continue;
 		}
@@ -2303,6 +2343,12 @@ void DisplayServerWayland::process_events() {
 	wayland_thread.mutex.unlock();
 
 	Input::get_singleton()->flush_buffered_events();
+#ifdef AURORAOS_ENABLED
+	{
+		MutexLock mutex_lock(wayland_thread.mutex);
+		_aurora_update_ime_context();
+	}
+#endif
 }
 
 void DisplayServerWayland::release_rendering_thread() {

@@ -179,6 +179,10 @@ public:
 	public:
 		String text;
 		Vector2i selection;
+#ifdef AURORAOS_ENABLED
+		bool scoped = false;
+		uint64_t generation = 0;
+#endif
 	};
 
 	class IMECommitEventMessage : public WindowMessage {
@@ -190,6 +194,7 @@ public:
 		Callable callback;
 		uint64_t generation = 0;
 		bool atomic = false;
+		Dictionary operation;
 #endif
 	};
 
@@ -349,6 +354,8 @@ public:
 		struct wl_surface *wl_surface = nullptr;
 #ifdef AURORAOS_ENABLED
 		Callable ime_commit_callback;
+		Callable ime_context_callback;
+		Dictionary ime_context;
 		uint64_t ime_generation = 0;
 		struct qt_extended_surface *qt_extended_surface = nullptr;
 		struct wl_shell_surface *legacy_shell_surface = nullptr;
@@ -1379,6 +1386,7 @@ public:
 #ifdef AURORAOS_ENABLED
 	bool aurora_has_virtual_keyboard() const { return registry.aurora_text_manager && !registry.wp_text_input_manager; }
 	void aurora_cancel_touches();
+	void aurora_set_ime_context(DisplayServerEnums::WindowID p_window, const Dictionary &p_context, bool p_reset);
 	void aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType type);
 	int aurora_keyboard_height() const;
 #endif

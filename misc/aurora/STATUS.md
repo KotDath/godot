@@ -4,6 +4,31 @@ Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
 
+## IME context and range edits (point 4, second part)
+
+The new internal DisplayServer text-client callbacks supply a bounded committed
+text context, Unicode cursor/anchor and origin. Aurora converts UTF-8 byte ranges,
+queues selection replacement/deletion and post-commit cursor moves, and rejects
+stale snapshots or invalid scalar boundaries. External text/caret changes use a
+protocol reset and `wl_display_sync` barrier. Preedit events are focus-scoped;
+preedit defaults to an end cursor and supports the protocol highlight range.
+Passwords advertise empty text and hidden/sensitive purpose. Oversized selections
+and multiple carets keep ordinary insertion, with extended context edits disabled.
+See `misc/aurora/IME.md` for the contract and limits.
+
+Linux C++ tests: 3 Aurora IME cases / 47 assertions pass; TextEdit regression:
+14 cases / 4235 assertions pass. ARM64 and ARM32 editor builds pass. KVADRA final test RPM
+4.7.2-10 passed the original 13 native editing checkpoints and per-character
+Maliit acknowledgements for Cyrillic/emoji, insertion after a caret move, and
+multiline/tab text. Its captured trace passed 145 bounded-context checks,
+including password wire privacy. Range replacement and post-commit selection are
+covered by C++ tests; prediction/composing input methods still need hardware coverage.
+The final package passed Regular validation with the existing non-Silica warning
+and uses SDK public development signing credentials (no root-CA verification).
+
+Preedit fallback/styling/hidden caret, continuous candidate/cursor geometry,
+keyboard avoidance and composing-language hardware coverage remain open.
+
 ## Atomic IME commits (point 4, first part)
 
 Aurora text-input-v2 now queues whole strings to the focused text control on the
@@ -22,9 +47,8 @@ exactly; the fixture's default font lacks some emoji glyphs. This is a standalon
 fixture run from the installed editor binary; it is not a new sandbox claim.
 
 ARM64 and ARM32 editor builds pass with this change.
-`misc/aurora/ime_smoke` contains the fixture and log verifier. Full surrounding-text
-synchronization, prediction/replacement ranges and composition/reset coverage are
-still pending. ARM32 hardware and Linux Wayland runtime regression remain pending.
+`misc/aurora/ime_smoke` contains the fixture and log verifier. The context implementation adds surrounding-text and replacement ranges;
+remaining composition and geometry coverage is listed separately. ARM32 hardware and Linux Wayland runtime regression remain pending.
 Aurora APM can retain an old `current` version while the editor is running; stop it
 and launch through RuntimeManager before checking an updated package.
 The SDK currently sees a stale Git worktree ref (`7281b98b6`) outside this source
@@ -183,9 +207,9 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
   tests pass, ARM64 editor and subsequent Linux editor builds pass; eight existing
   packaging tests also pass. Concurrent builds still require separate worktrees.
 - Reproduction and opt-in plugin: [editor_smoke/README.md](editor_smoke/README.md).
-  Multiline IME commits still discard newline/tab; Enter-key editing works.
-  Surrounding text/selection/prediction, keyboard occlusion of dialogs, broader
-  editor operations and ARM32 hardware remain pending.
+  The later IME changes above fix multiline commits and add bounded surrounding
+  text/selection and range edits. Composing input methods, keyboard occlusion of
+  dialogs, broader editor operations and ARM32 hardware remain pending.
 
 ## Runtime findings
 
@@ -207,8 +231,8 @@ libxkbcommon is bundled with its license because it is not Regular public API.
 
 ## Remaining work
 
-- Full IME surrounding-text synchronization, predictive edits/selection
-  and multiline editor text insertion; lock/unlock and broader lifecycle testing; audible
+- Remaining IME preedit fallback/styling/geometry, composing-language hardware coverage
+  and keyboard avoidance; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
 - Broader deployment recovery/cancellation and encrypted-key signing UI;

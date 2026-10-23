@@ -3449,11 +3449,99 @@ void TextEdit::_close_ime_window() {
 	DisplayServer::get_singleton()->window_set_ime_active(false, wid);
 }
 
-void TextEdit::_ime_commit_text(const String &p_text) {
-	if (!has_focus() || !window_has_focus || !editable || p_text.is_empty()) {
+Vector2i TextEdit::_ime_offset_position(Vector2i p_position, int p_offset) const {
+	while (p_offset < 0) {
+		const int count = MIN(-p_offset, p_position.x);
+		p_position.x -= count;
+		p_offset += count;
+		if (p_offset == 0 || p_position.y == 0) {
+			break;
+		}
+		p_position.y--;
+		p_position.x = text[p_position.y].length();
+		p_offset++;
+	}
+	while (p_offset > 0) {
+		const int count = MIN(p_offset, text[p_position.y].length() - p_position.x);
+		p_position.x += count;
+		p_offset -= count;
+		if (p_offset == 0 || p_position.y == text.size() - 1) {
+			break;
+		}
+		p_position.y++;
+		p_position.x = 0;
+		p_offset--;
+	}
+	return p_position;
+}
+
+Dictionary TextEdit::_ime_get_context() const {
+	if (!has_focus() || !window_has_focus || !editable) {
+		return Dictionary();
+	}
+	const Vector2i cursor(get_caret_column(), get_caret_line());
+	const Vector2i anchor = has_selection() ? Vector2i(get_selection_origin_column(), get_selection_origin_line()) : cursor;
+	const bool forward = cursor.y > anchor.y || (cursor.y == anchor.y && cursor.x >= anchor.x);
+	const Vector2i low = forward ? anchor : cursor;
+	const Vector2i high = forward ? cursor : anchor;
+	// Count the selection first, stopping early for very large files/selections.
+	int selected = -low.x;
+	for (int line = low.y; line <= high.y && selected <= 1000; line++) {
+		selected += line == high.y ? high.x : text[line].length() + 1;
+	}
+	Dictionary context;
+	context["multiline"] = true;
+	context["available"] = selected <= 1000 && get_caret_count() == 1;
+	context["secret"] = false;
+	Vector2i start = cursor;
+	Vector2i end = cursor;
+	if (selected <= 1000 && get_caret_count() == 1) {
+		const int margin = (1000 - selected) / 2;
+		start = _ime_offset_position(low, -margin);
+		end = _ime_offset_position(high, margin);
+	}
+	context["origin"] = start;
+	context["text"] = _base_get_text(start.y, start.x, end.y, end.x);
+	context["cursor"] = start == end ? 0 : _base_get_text(start.y, start.x, cursor.y, cursor.x).length();
+	context["anchor"] = start == end ? 0 : _base_get_text(start.y, start.x, anchor.y, anchor.x).length();
+	return context;
+}
+
+void TextEdit::_ime_commit_text(const Dictionary &p_operation) {
+	if (!has_focus() || !window_has_focus || !editable) {
 		return;
 	}
-	insert_text_at_caret(p_text);
+	const String committed = p_operation.get("text", String());
+	if (p_operation.has("context") && _ime_get_context() != Dictionary(p_operation["context"])) {
+		return;
+	}
+	if (committed.is_empty() && !p_operation.has("range") && !p_operation.has("selection")) {
+		return;
+	}
+	if (!p_operation.has("context")) {
+		insert_text_at_caret(committed);
+		return;
+	}
+	const Dictionary context = p_operation["context"];
+	const Vector2i origin = context["origin"];
+	begin_complex_operation();
+	if (p_operation.has("range")) {
+		const Vector2i range = p_operation["range"];
+		const Vector2i start = _ime_offset_position(origin, range.x);
+		const Vector2i end = _ime_offset_position(origin, range.y);
+		deselect(0);
+		remove_text(start.y, start.x, end.y, end.x);
+		set_caret_line(start.y, false);
+		set_caret_column(start.x, false);
+		insert_text_at_caret(committed, 0);
+	}
+	if (p_operation.has("selection")) {
+		const Vector2i positions = p_operation["selection"];
+		const Vector2i cursor = _ime_offset_position(origin, positions.x);
+		const Vector2i anchor = _ime_offset_position(origin, positions.y);
+		select(anchor.y, anchor.x, cursor.y, cursor.x, 0);
+	}
+	end_complex_operation();
 }
 
 void TextEdit::_update_ime_window_position() {
@@ -3466,7 +3554,7 @@ void TextEdit::_update_ime_window_position() {
 		return;
 	}
 	DisplayServer::get_singleton()->window_set_ime_active(true, wid);
-	DisplayServer::get_singleton()->window_set_ime_commit_callback(callable_mp(this, &TextEdit::_ime_commit_text), wid);
+	DisplayServer::get_singleton()->window_set_ime_callbacks(callable_mp(this, &TextEdit::_ime_commit_text), callable_mp(this, &TextEdit::_ime_get_context), wid);
 	Point2 pos = get_global_position() + get_caret_draw_pos();
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();
