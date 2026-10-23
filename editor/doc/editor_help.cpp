@@ -3093,6 +3093,12 @@ static void _load_script_doc_cache(bool p_changes) {
 }
 
 void EditorHelp::load_script_doc_cache() {
+	// Native doc generation can queue this callback before editor teardown and
+	// deliver it after cleanup_doc(). Do not start new work after its owners die.
+	if (!doc || !EditorNode::get_singleton() || !EditorFileSystem::get_singleton()) {
+		return;
+	}
+
 	if (!ProjectSettings::get_singleton()->is_project_loaded()) {
 		print_verbose("Skipping loading script doc cache since no project is open.");
 		return;
@@ -3167,6 +3173,10 @@ static void _regenerate_script_doc_cache(bool p_changes) {
 }
 
 void EditorHelp::regenerate_script_doc_cache() {
+	if (!doc || !EditorNode::get_singleton() || !EditorFileSystem::get_singleton()) {
+		return;
+	}
+
 	if (EditorFileSystem::get_singleton()->is_scanning()) {
 		// Wait until EditorFileSystem scanning is complete to use updated filesystem structure.
 		EditorFileSystem::get_singleton()->connect(SNAME("sources_changed"), callable_mp_static(_regenerate_script_doc_cache), CONNECT_ONE_SHOT);
