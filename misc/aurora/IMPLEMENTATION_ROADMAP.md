@@ -250,6 +250,14 @@ CI: шесть ARM-артефактов, godot-cpp/пример SCons+CMake, ELF
 godot-cpp, API, SDK/sysroot и build flags. Секреты подписи вне репозитория.
 Компиляция и аппаратный запуск отражаются раздельно.
 
+**Первый шаг выполнен:** SDK runner берёт Git commit/timestamp на хосте исходников
+и передаёт их внутрь engine явно, обходя устаревшие worktree refs shared mount.
+Без optional override обычная Linux-сборка сохраняет прежний Git lookup. Девять
+Python-проверок проходят; оба ARM-редактора содержат проверенные host commit и
+timestamp, Linux-редактор с обычным lookup собирается и проходит Wayland/42 smoke.
+Это идентификатор HEAD, не attestation незакоммиченных исходников. Полный манифест
+артефактов, CI и финальная матрица ещё требуют реализации/проверок.
+
 ## Источники и исходные файлы
 
 - misc/aurora/STATUS.md, EXPORT.md, PLAN.md.

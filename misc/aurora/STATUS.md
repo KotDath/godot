@@ -3,6 +3,23 @@
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
+## Source-host build version metadata (point 13, first part)
+
+Reproduced a provenance mismatch: the host was at `753bc0cdc7`, while an SDK query
+and the previous ARM64 template still contained `7bdb350151`. The build runner now
+reads HEAD/timestamp on the source host and forwards an explicit validated pair
+inside the SDK engine. It does not rewrite Git refs. Without the optional pair,
+the common version helper retains normal Git lookup for Linux and other builds.
+This identifies HEAD; uncommitted-source attestation is still separate work.
+
+Validation: 9 Python runner/lifecycle-metadata cases pass, including stale-Git
+override, unchanged default lookup, literal SDK argv, incomplete/invalid metadata,
+timestamp bounds and decimal normalization. ARM64 and ARM32 editor rebuilds both
+contain the exact source commit `e57c3527024f2ba676fff47f733d6dfa73c93322` and its
+timestamp `1792795063`. The Linux editor built without override also reports that
+commit; its real Wayland 3D/native-chain regression returns 42. CI/artifact manifests
+and the complete final six-artifact matrix are not yet complete.
+
 ## Native library trees and reload acceptance (point 8, software part)
 
 The desktop exporter now sends a schema-1 source/resource/target map with host
@@ -166,10 +183,10 @@ ARM64 and ARM32 editor builds pass with this change.
 remaining composition and geometry coverage is listed separately. ARM32 hardware and Linux Wayland runtime regression remain pending.
 Aurora APM can retain an old `current` version while the editor is running; stop it
 and launch through RuntimeManager before checking an updated package.
-The SDK currently sees a stale Git worktree ref (`7281b98b6`) outside this source
-worktree, so the embedded Git revision is not reliable provenance for these local
-builds. The test identifies the exact RPM release and `/proc/PID/exe`; SDK Git
-metadata synchronization remains a build reproducibility follow-up.
+At that stage the SDK saw a stale Git worktree ref (`7281b98b6`) outside this source
+worktree, so that test identifies the exact RPM release and `/proc/PID/exe` instead
+of trusting the embedded Git revision. The later source-host metadata change above
+fixes the version identifier for new builds; it does not relabel those old RPMs.
 
 ## Verified
 
