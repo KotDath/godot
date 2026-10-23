@@ -31,6 +31,8 @@
 #include "wayland_thread.h"
 #ifdef AURORAOS_ENABLED
 #include "platform/auroraos/legacy_shell.h"
+#include "platform/auroraos/orientation_input.h"
+#include "platform/auroraos/text_input_v2.h"
 #endif
 
 #include "core/config/engine.h"
@@ -652,6 +654,9 @@ void WaylandThread::_wl_registry_on_global(void *data, struct wl_registry *wl_re
 		}
 
 		registry->wl_seats.push_back(wl_seat);
+#ifdef AURORAOS_ENABLED
+		AuroraTextInput::attach(ss);
+#endif
 
 		wl_seat_add_listener(wl_seat, &wl_seat_listener, ss);
 
@@ -1241,6 +1246,9 @@ void WaylandThread::_wl_registry_on_global_remove(void *data, struct wl_registry
 			ERR_FAIL_NULL(ss);
 
 			if (ss->wl_seat_name == name) {
+#ifdef AURORAOS_ENABLED
+				AuroraTextInput::detach(ss);
+#endif
 				if (wl_seat) {
 					wl_seat_destroy(wl_seat);
 				}
@@ -1385,8 +1393,10 @@ void WaylandThread::_wl_output_on_geometry(void *data, struct wl_output *wl_outp
 	ScreenState *ss = (ScreenState *)data;
 	ERR_FAIL_NULL(ss);
 
-	ss->pending_data.position.x = x;
-
+#ifdef AURORAOS_ENABLED
+	// Mirrored outputs are not mobile orientation modes.
+	ss->pending_data.transform = transform >= 0 && transform <= 3 ? transform : 0;
+#endif
 	ss->pending_data.position.x = x;
 	ss->pending_data.position.y = y;
 
@@ -2602,6 +2612,10 @@ void WaylandThread::_wl_touch_on_up(void *data, struct wl_touch *wl_touch, uint3
 void WaylandThread::_wl_touch_on_motion(void *data, struct wl_touch *wl_touch, uint32_t time, int32_t id, wl_fixed_t x, wl_fixed_t y) {
 	SeatState *ss = (SeatState *)data;
 	ERR_FAIL_NULL(ss);
+	// Ignore the remainder of a sequence canceled on focus/orientation change.
+	if (!ss->touch_points_buffer.has(id)) {
+		return;
+	}
 
 	ss->last_touch_id = id;
 
@@ -2731,6 +2745,9 @@ void WaylandThread::_wl_touch_on_cancel(void *data, struct wl_touch *wl_touch) {
 		TouchPoint &tp = pair.value;
 
 		WindowState *ws = wayland_thread->window_get_state(tp.touched_id);
+		if (!ws) {
+			continue;
+		}
 		double scale = window_state_get_scale_factor(ws);
 
 		Ref<InputEventScreenTouch> st;
@@ -4343,6 +4360,19 @@ void WaylandThread::seat_state_echo_keys(SeatState *p_ss) {
 }
 
 void WaylandThread::push_message(Ref<Message> message) {
+#ifdef AURORAOS_ENABLED
+	// Transform at enqueue time, not dispatch time: an orientation change may
+	// happen while input events are waiting in the queue.
+	Ref<InputEventMessage> input = message;
+	if (input.is_valid()) {
+		Ref<InputEventFromWindow> event = input->event;
+		auto *ws = event.is_valid() ? window_get_state(event->get_window_id()) : nullptr;
+		if (ws && ws->legacy_shell_surface) {
+			const auto presentation = AuroraOrientation::get_presentation();
+			AuroraOrientation::transform_input(input->event, presentation.native_size, presentation.transform);
+		}
+	}
+#endif
 	messages.push_back(message);
 }
 
@@ -5834,6 +5864,11 @@ void WaylandThread::cursor_shape_clear_custom_image(DisplayServerEnums::CursorSh
 
 void WaylandThread::window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id) {
 	SeatState *ss = wl_seat_get_seat_state(wl_seat_current);
+#ifdef AURORAOS_ENABLED
+	if (AuroraTextInput::activate(ss, p_window_id, p_active)) {
+		return;
+	}
+#endif
 
 	if (ss && ss->wp_text_input && ss->ime_enabled) {
 		if (p_active) {
@@ -5853,6 +5888,11 @@ void WaylandThread::window_set_ime_active(const bool p_active, DisplayServerEnum
 
 void WaylandThread::window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id) {
 	SeatState *ss = wl_seat_get_seat_state(wl_seat_current);
+#ifdef AURORAOS_ENABLED
+	if (AuroraTextInput::cursor(ss, p_pos, p_window_id)) {
+		return;
+	}
+#endif
 
 	if (ss && ss->wp_text_input && ss->ime_enabled) {
 		WindowState *ws = window_get_state(p_window_id);

@@ -29,6 +29,9 @@
 /**************************************************************************/
 
 #include "rasterizer_gles3.h"
+#ifdef AURORAOS_ENABLED
+#include "platform/auroraos/orientation.h"
+#endif
 
 #ifdef GLES3_ENABLED
 
@@ -445,6 +448,20 @@ void RasterizerGLES3::_blit_render_target_to_screen(DisplayServerEnums::WindowID
 	Rect2 screenrect = Rect2(Vector2(0.0, flip_y ? 1.0 : 0.0), Vector2(1.0, flip_y ? -1.0 : 1.0));
 
 	glViewport(int(MIN(p1.x, p2.x)), int(MIN(p1.y, p2.y)), Math::abs(size.x), Math::abs(size.y));
+	int quarter_turns = 0;
+#ifdef AURORAOS_ENABLED
+	const auto presentation = AuroraOrientation::get_presentation();
+	if (p_screen == DisplayServerEnums::MAIN_WINDOW_ID && presentation.transform && presentation.native_size.x > 0 && presentation.native_size.y > 0) {
+		quarter_turns = (4 - presentation.transform) % 4;
+		Vector2 logical_size = presentation.native_size;
+		if (presentation.transform % 2) {
+			SWAP(logical_size.x, logical_size.y);
+		}
+		Vector2 a = AuroraOrientation::to_buffer(p_blit.dst_rect.position, logical_size, quarter_turns);
+		Vector2 b = AuroraOrientation::to_buffer(p_blit.dst_rect.get_end(), logical_size, quarter_turns);
+		glViewport(int(MIN(a.x, b.x)), int(MIN(a.y, b.y)), int(Math::abs(b.x - a.x)), int(Math::abs(b.y - a.y)));
+	}
+#endif
 
 	glActiveTexture(GL_TEXTURE0);
 	GLenum target = rt->view_count > 1 ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
@@ -462,7 +479,9 @@ void RasterizerGLES3::_blit_render_target_to_screen(DisplayServerEnums::WindowID
 	} else if (rt->view_count > 1) {
 		copy_effects->copy_to_rect_3d(screenrect, p_blit.multi_view.use_layer ? p_blit.multi_view.layer : 0, GLES3::Texture::TYPE_LAYERED, 0.0, linear_to_srgb);
 	} else {
-		copy_effects->copy_to_rect(screenrect, linear_to_srgb);
+		// The copy quad already flips Y, so its rotation has the opposite sign
+		// to the surface-coordinate rectangle transform.
+		copy_effects->copy_to_rect(screenrect, linear_to_srgb, (4 - quarter_turns) % 4);
 	}
 
 	glBindTexture(GL_TEXTURE_2D, 0);

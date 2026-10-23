@@ -100,6 +100,8 @@
 
 class Image;
 
+struct AuroraTextInputState;
+
 class WaylandThread {
 public:
 	struct ColorProfile {
@@ -216,6 +218,8 @@ public:
 		List<struct wl_seat *> wl_seats;
 
 #ifdef AURORAOS_ENABLED
+		struct zwp_text_input_manager_v2 *aurora_text_manager = nullptr;
+		uint32_t aurora_text_manager_name = 0;
 		struct qt_surface_extension *qt_surface_extension = nullptr;
 		uint32_t qt_surface_extension_name = 0;
 		struct wl_shell *legacy_shell = nullptr;
@@ -402,6 +406,9 @@ public:
 
 		Size2i size;
 		Size2i physical_size;
+#ifdef AURORAOS_ENABLED
+		int transform = 0;
+#endif
 
 		float refresh_rate = -1;
 		int scale = 1;
@@ -620,6 +627,9 @@ public:
 		List<struct zwp_tablet_tool_v2 *> tablet_tools;
 
 		// IME.
+#ifdef AURORAOS_ENABLED
+		AuroraTextInputState *aurora_text_input = nullptr;
+#endif
 		struct zwp_text_input_v3 *wp_text_input = nullptr;
 		DisplayServerEnums::WindowID ime_window_id = DisplayServerEnums::INVALID_WINDOW_ID;
 		bool ime_enabled = false;
@@ -1359,6 +1369,12 @@ public:
 	void cursor_shape_set_custom_image(DisplayServerEnums::CursorShape p_cursor_shape, Ref<Image> p_image, const Point2i &p_hotspot);
 	void cursor_shape_clear_custom_image(DisplayServerEnums::CursorShape p_cursor_shape);
 
+#ifdef AURORAOS_ENABLED
+	bool aurora_has_virtual_keyboard() const { return registry.aurora_text_manager && !registry.wp_text_input_manager; }
+	void aurora_cancel_touches();
+	void aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType type);
+	int aurora_keyboard_height() const;
+#endif
 	void window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id);
 	void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id);
 

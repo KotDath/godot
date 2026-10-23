@@ -60,7 +60,7 @@ public:
 	~CopyEffects();
 
 	// These functions assume that a framebuffer and texture are bound already. They only manage the shader, uniforms, and vertex array.
-	void copy_to_rect(const Rect2 &p_rect, bool p_linear_to_srgb = false);
+	void copy_to_rect(const Rect2 &p_rect, bool p_linear_to_srgb = false, int p_quarter_turns = 0);
 	void copy_to_rect_3d(const Rect2 &p_rect, float p_layer, int p_type, float p_lod = 0.0f, bool p_linear_to_srgb = false);
 	void copy_with_lens_distortion(const Rect2 &p_rect, float p_layer, const Vector2 &p_eye_center, float p_k1, float p_k2, float p_upscale, float p_aspect_ration, bool p_linear_to_srgb = false);
 	void copy_to_and_from_rect(const Rect2 &p_rect);

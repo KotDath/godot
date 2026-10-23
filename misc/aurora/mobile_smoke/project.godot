@@ -1,0 +1,10 @@
+config_version=5
+[application]
+config/name="Aurora Mobile Smoke"
+run/main_scene="res://main.tscn"
+[display]
+window/size/mode=2
+window/handheld/orientation=6
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

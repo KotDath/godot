@@ -5,9 +5,12 @@ Import("env")
 
 sources = ["godot_auroraos.cpp", "os_auroraos.cpp"]
 if env["wayland"]:
-    sources += ["legacy_shell.cpp"]
+    sources += ["legacy_shell.cpp", "text_input_v2.cpp", "orientation_wayland.cpp"]
     sources += SConscript("#platform/linuxbsd/wayland/SCsub")
     protocol = "#platform/auroraos/protocol/surface-extension.xml"
     env.WAYLAND_API_HEADER("protocol/surface_extension.gen.h", protocol)
     sources += env.WAYLAND_API_CODE("protocol/surface_extension.gen.c", protocol)
+    text_protocol = "#platform/auroraos/protocol/text-input-unstable-v2.xml"
+    env.WAYLAND_API_HEADER("protocol/text_input_v2.gen.h", text_protocol)
+    sources += env.WAYLAND_API_CODE("protocol/text_input_v2.gen.c", text_protocol)
 env.add_program("#bin/godot", sources)

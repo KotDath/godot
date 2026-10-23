@@ -138,6 +138,13 @@ class DisplayServerWayland : public DisplayServer {
 	DisplayServerEnums::WindowID window_id_counter = DisplayServerEnums::MAIN_WINDOW_ID;
 
 	WaylandThread wayland_thread;
+#ifdef AURORAOS_ENABLED
+	DisplayServerEnums::ScreenOrientation aurora_orientation = DisplayServerEnums::SCREEN_SENSOR;
+	int aurora_transform = 0;
+	void _aurora_update_orientation();
+	bool aurora_paused = false;
+	void _aurora_update_lifecycle();
+#endif
 
 	DisplayServerEnums::Context context;
 	bool swap_cancel_ok = false;
@@ -251,6 +258,13 @@ public:
 
 	virtual bool is_touchscreen_available() const override;
 
+#ifdef AURORAOS_ENABLED
+	void virtual_keyboard_show(const String &p_existing_text, const Rect2 &p_screen_rect, DisplayServerEnums::VirtualKeyboardType p_type, int p_max_length, int p_cursor_start, int p_cursor_end) override;
+	void virtual_keyboard_hide() override;
+	int virtual_keyboard_get_height() const override;
+	void screen_set_orientation(DisplayServerEnums::ScreenOrientation p_orientation, int p_screen = DisplayServerEnums::SCREEN_OF_MAIN_WINDOW) override;
+	DisplayServerEnums::ScreenOrientation screen_get_orientation(int p_screen = DisplayServerEnums::SCREEN_OF_MAIN_WINDOW) const override;
+#endif
 	virtual void screen_set_keep_on(bool p_enable) override;
 	virtual bool screen_is_kept_on() const override;
 

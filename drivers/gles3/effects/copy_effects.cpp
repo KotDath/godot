@@ -116,15 +116,18 @@ CopyEffects::~CopyEffects() {
 	copy.shader.version_free(copy.shader_version);
 }
 
-void CopyEffects::copy_to_rect(const Rect2 &p_rect, bool p_linear_to_srgb) {
+void CopyEffects::copy_to_rect(const Rect2 &p_rect, bool p_linear_to_srgb, int p_quarter_turns) {
 	uint64_t specializations = p_linear_to_srgb ? CopyShaderGLES3::CONVERT_LINEAR_TO_SRGB : 0;
-
-	bool success = copy.shader.version_bind_shader(copy.shader_version, CopyShaderGLES3::MODE_COPY_SECTION, specializations);
-	if (!success) {
+	auto variant = p_quarter_turns ? CopyShaderGLES3::MODE_COPY_SECTION_ROTATED : CopyShaderGLES3::MODE_COPY_SECTION;
+	if (!copy.shader.version_bind_shader(copy.shader_version, variant, specializations)) {
 		return;
 	}
-
-	copy.shader.version_set_uniform(CopyShaderGLES3::COPY_SECTION, p_rect.position.x, p_rect.position.y, p_rect.size.x, p_rect.size.y, copy.shader_version, CopyShaderGLES3::MODE_COPY_SECTION, specializations);
+	copy.shader.version_set_uniform(CopyShaderGLES3::COPY_SECTION, p_rect.position.x, p_rect.position.y, p_rect.size.x, p_rect.size.y, copy.shader_version, variant, specializations);
+	if (p_quarter_turns) {
+		static const Vector2 rotations[] = { Vector2(1, 0), Vector2(0, 1), Vector2(-1, 0), Vector2(0, -1) };
+		const Vector2 rotation = rotations[p_quarter_turns & 3];
+		copy.shader.version_set_uniform(CopyShaderGLES3::COPY_ROTATION, rotation, copy.shader_version, variant, specializations);
+	}
 	draw_screen_quad();
 }
 

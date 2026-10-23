@@ -31,6 +31,7 @@
 #include "legacy_shell.h"
 
 #include "protocol/surface_extension.gen.h"
+#include "text_input_v2.h"
 
 namespace AuroraLegacyShell {
 namespace {
@@ -43,7 +44,14 @@ void configure(void *p_data, wl_shell_surface *, uint32_t, int32_t p_width, int3
 	window->ready = true;
 }
 void popup_done(void *, wl_shell_surface *) {}
-void visibility(void *, qt_extended_surface *, int32_t) {}
+void visibility(void *data, qt_extended_surface *, int32_t visible) {
+	auto *window = static_cast<WaylandThread::WindowState *>(data);
+	// qt_extended_surface uses QWindow::Visibility, not a boolean.
+	if (visible != 1) { // Automatic does not specify a visibility state.
+		window->suspended = visible == 0 || visible == 3; // Hidden or Minimized.
+	}
+	print_verbose(vformat("Aurora surface visibility: %d", visible));
+}
 void property(void *, qt_extended_surface *, const char *, wl_array *) {}
 void close(void *p_data, qt_extended_surface *) {
 	auto *window = static_cast<WaylandThread::WindowState *>(p_data);
@@ -58,6 +66,9 @@ const wl_shell_surface_listener listener = { ping, configure, popup_done };
 } //namespace
 
 bool bind(WaylandThread::RegistryState &p_registry, wl_registry *p_wl_registry, uint32_t p_name, const char *p_interface) {
+	if (AuroraTextInput::bind(p_registry, p_wl_registry, p_name, p_interface)) {
+		return true;
+	}
 	if (strcmp(p_interface, qt_surface_extension_interface.name) == 0) {
 		p_registry.qt_surface_extension = static_cast<qt_surface_extension *>(wl_registry_bind(p_wl_registry, p_name, &qt_surface_extension_interface, 1));
 		p_registry.qt_surface_extension_name = p_name;
@@ -71,6 +82,9 @@ bool bind(WaylandThread::RegistryState &p_registry, wl_registry *p_wl_registry, 
 	return true;
 }
 bool remove(WaylandThread::RegistryState &p_registry, uint32_t p_name) {
+	if (AuroraTextInput::remove(p_registry, p_name)) {
+		return true;
+	}
 	if (p_name == p_registry.qt_surface_extension_name) {
 		qt_surface_extension_destroy(p_registry.qt_surface_extension);
 		p_registry.qt_surface_extension = nullptr;

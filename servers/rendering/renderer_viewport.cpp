@@ -1180,6 +1180,11 @@ void RendererViewport::viewport_attach_to_screen(RID p_viewport, const Rect2 &p_
 }
 
 void RendererViewport::viewport_set_render_direct_to_screen(RID p_viewport, bool p_enable) {
+#ifdef AURORAOS_ENABLED
+	// Aurora rotates the final GLES blit into the native-orientation framebuffer.
+	// Keep the intermediate render target even when direct rendering is requested.
+	p_enable = false;
+#endif
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL(viewport);
 

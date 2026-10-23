@@ -45,6 +45,12 @@ Copyright: 2014-present, Godot Engine contributors
  2007-2014, Juan Linietsky, Ariel Manzur
 License: Expat
 
+Files: platform/auroraos/protocol/text-input-unstable-v2.xml
+Comment: Wayland text input v2 protocol
+Copyright: 2012-2013, Intel Corporation
+  2015-2016, Jan Arne Petersen
+License: X11
+
 Files: platform/auroraos/protocol/surface-extension.xml
 Comment: Qt Wayland surface extension protocol
 Copyright: 2012, Digia Plc and/or its subsidiary(-ies)

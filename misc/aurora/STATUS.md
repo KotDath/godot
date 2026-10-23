@@ -35,6 +35,26 @@ SDK public Regular development credentials. Signature dumps and device
 installation results were checked; root-CA verification was not performed
 (no root certificate supplied). These are not production signatures.
 
+## Mobile runtime update
+
+- KVADRA ARM64: four fixed orientations render upright; landscape corner buttons
+  match touch coordinates. Physical sensor rotation reported all four transforms.
+- Rotating during a held touch emits a canceled release in the previous coordinate
+  system. Input is transformed when queued, before subsequent orientation changes.
+- Native text-input-v2 keyboard opens; actual keyboard taps produced `q`, `qe`,
+  then `q` after Backspace. Switching to Russian produced `qй`, `qйу`, then
+  `qй` after Backspace. UTF-8 commit/preedit conversion is implemented;
+  prediction, selection and full editor text entry still need testing.
+- Minimize/reopen produces pause (2015) and resume (2014), suspends/resumes
+  drawing, and leaves touch and keyboard input working (test RPM 4.7.2-5).
+- Updated debug templates compile for ARM32 and ARM64; ARM32 hardware validation
+  is pending. The updated Linux editor builds with `use_static_cpp=no`; its GLES
+  X11 smoke test under Xvfb/llvmpipe again loads the dependency chain and returns 42.
+- See [mobile_smoke/README.md](mobile_smoke/README.md) for architecture,
+  reproduction and limits. The updated ARM64 editor also compiles; device editor
+  interaction with this update is not yet retested. ARM32 editor and release
+  artifacts still need rebuilding to include this update.
+
 ## Runtime findings
 
 KVADRA provides wl_shell, qt_surface_extension, text-input-v2, viewporter,
@@ -55,8 +75,9 @@ libxkbcommon is bundled with its license because it is not Regular public API.
 
 ## Remaining work
 
-- text-input-v2 / virtual keyboard, orientation policy, focus/background,
-  suspend and touch cancellation testing; audible playback/resource routing.
+- Full IME surrounding-text synchronization, predictive edits/selection
+  and editor text entry; lock/unlock and broader lifecycle testing; audible
+  playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
 - One-click deployment through audb, remote-debug launch flags, signing UI,
   Windows/macOS host packaging and broader RPM layout support.

@@ -3,6 +3,7 @@
 
 mode_default = #define MODE_SIMPLE_COPY
 mode_copy_section = #define USE_COPY_SECTION \n#define MODE_SIMPLE_COPY
+mode_copy_section_rotated = #define USE_COPY_SECTION \n#define MODE_SIMPLE_COPY \n#define ROTATE_COPY
 mode_copy_section_source = #define USE_COPY_SECTION \n#define MODE_SIMPLE_COPY \n#define MODE_COPY_FROM
 mode_copy_section_3d = #define USE_COPY_SECTION \n#define MODE_SIMPLE_COPY \n#define USE_TEXTURE_3D
 mode_copy_section_2d_array = #define USE_COPY_SECTION \n#define MODE_SIMPLE_COPY \n#define USE_TEXTURE_2D_ARRAY
@@ -34,12 +35,19 @@ uniform highp vec4 copy_section;
 uniform highp vec4 source_section;
 #endif
 
+#ifdef ROTATE_COPY
+uniform highp vec2 copy_rotation;
+#endif
+
 void main() {
 	uv_interp = vertex_attrib * 0.5 + 0.5;
 	gl_Position = vec4(vertex_attrib, 1.0, 1.0);
 
 #if defined(USE_COPY_SECTION) || defined(MODE_GAUSSIAN_BLUR)
 	gl_Position.xy = (copy_section.xy + uv_interp.xy * copy_section.zw) * 2.0 - 1.0;
+#ifdef ROTATE_COPY
+	gl_Position.xy = mat2(copy_rotation.x, copy_rotation.y, -copy_rotation.y, copy_rotation.x) * gl_Position.xy;
+#endif
 #endif
 #if defined(MODE_GAUSSIAN_BLUR) || defined(MODE_COPY_FROM)
 	uv_interp = source_section.xy + uv_interp * source_section.zw;

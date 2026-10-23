@@ -29,6 +29,9 @@
 /**************************************************************************/
 
 #include "display_server_wayland.h"
+#ifdef AURORAOS_ENABLED
+#include "platform/auroraos/orientation.h"
+#endif
 
 #ifdef WAYLAND_ENABLED
 
@@ -228,11 +231,27 @@ void DisplayServerWayland::_update_window_rect(const Rect2i &p_rect, DisplayServ
 
 	WindowData &wd = windows[p_window_id];
 
-	if (wd.rect == p_rect) {
+	Rect2i compare_rect = p_rect;
+#ifdef AURORAOS_ENABLED
+	auto *compare_ws = wayland_thread.window_get_state(p_window_id);
+	if (compare_ws && compare_ws->legacy_shell_surface) {
+		AuroraOrientation::set_presentation(p_rect.size, aurora_transform);
+		if (aurora_transform % 2) {
+			SWAP(compare_rect.size.x, compare_rect.size.y);
+		}
+	}
+#endif
+	if (wd.rect == compare_rect) {
 		return;
 	}
 
 	wd.rect = p_rect;
+#ifdef AURORAOS_ENABLED
+	auto *aurora_ws = wayland_thread.window_get_state(p_window_id);
+	if (aurora_ws && aurora_ws->legacy_shell_surface && (aurora_transform % 2)) {
+		SWAP(wd.rect.size.x, wd.rect.size.y);
+	}
+#endif
 
 #ifdef RD_ENABLED
 	if (wd.visible && rendering_context) {
@@ -242,7 +261,15 @@ void DisplayServerWayland::_update_window_rect(const Rect2i &p_rect, DisplayServ
 
 #ifdef GLES3_ENABLED
 	if (wd.visible && egl_manager) {
-		wl_egl_window_resize(wd.wl_egl_window, wd.rect.size.width, wd.rect.size.height, 0, 0);
+		Size2i framebuffer_size = wd.rect.size;
+#ifdef AURORAOS_ENABLED
+		if (aurora_ws && aurora_ws->legacy_shell_surface) {
+			// QtWayland reports content orientation to the shell, but expects
+			// an application-rotated image in the native-sized framebuffer.
+			framebuffer_size = p_rect.size;
+		}
+#endif
+		wl_egl_window_resize(wd.wl_egl_window, framebuffer_size.width, framebuffer_size.height, 0, 0);
 	}
 #endif
 
@@ -281,6 +308,17 @@ void DisplayServerWayland::_hover_window(DisplayServerEnums::WindowID p_window_i
 // Interface methods.
 
 bool DisplayServerWayland::has_feature(DisplayServerEnums::Feature p_feature) const {
+#ifdef AURORAOS_ENABLED
+	if (p_feature == DisplayServerEnums::FEATURE_ORIENTATION) {
+		MutexLock lock(wayland_thread.mutex);
+		const auto *window = wayland_thread.window_get_state(DisplayServerEnums::MAIN_WINDOW_ID);
+		return window && window->legacy_shell_surface;
+	}
+	if (p_feature == DisplayServerEnums::FEATURE_VIRTUAL_KEYBOARD) {
+		MutexLock lock(wayland_thread.mutex);
+		return wayland_thread.aurora_has_virtual_keyboard();
+	}
+#endif
 	switch (p_feature) {
 #ifndef DISABLE_DEPRECATED
 		case DisplayServerEnums::FEATURE_GLOBAL_MENU: {
@@ -1422,6 +1460,14 @@ void DisplayServerWayland::window_set_ime_active(const bool p_active, DisplaySer
 void DisplayServerWayland::window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
+#ifdef AURORAOS_ENABLED
+	auto *ws = wayland_thread.window_get_state(p_window_id);
+	if (ws && ws->legacy_shell_surface && windows.has(p_window_id)) {
+		Point2i position = AuroraOrientation::to_buffer(p_pos, windows[p_window_id].rect.size, (4 - aurora_transform) % 4);
+		wayland_thread.window_set_ime_position(position, p_window_id);
+		return;
+	}
+#endif
 	wayland_thread.window_set_ime_position(p_pos, p_window_id);
 }
 
@@ -1931,6 +1977,10 @@ void DisplayServerWayland::try_suspend() {
 
 void DisplayServerWayland::process_events() {
 	wayland_thread.mutex.lock();
+#ifdef AURORAOS_ENABLED
+	_aurora_update_lifecycle();
+	_aurora_update_orientation();
+#endif
 
 	// Some behavior depends on the progress of the main thread.
 	wayland_thread.main_loop_callback();
@@ -2001,6 +2051,9 @@ void DisplayServerWayland::process_events() {
 				if (OS::get_singleton()->get_main_loop()) {
 					OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_OUT);
 				}
+#ifdef AURORAOS_ENABLED
+				wayland_thread.aurora_cancel_touches();
+#endif
 				Input::get_singleton()->release_pressed_events();
 			}
 			continue;
