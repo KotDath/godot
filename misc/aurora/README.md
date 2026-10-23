@@ -33,6 +33,18 @@ these configuration-dependent sources and restores the host variants even after
 a failed build. Run builds sequentially in a checkout; use
 separate worktrees for concurrent host and target builds.
 
+The runner reads the source checkout's HEAD and commit timestamp on the host and
+passes `GODOT_BUILD_GIT_HASH` / `GODOT_BUILD_GIT_TIMESTAMP` explicitly inside the
+SDK engine. This avoids stale worktree refs in the shared mount without modifying
+Git metadata. `--dry-run` includes these inputs. Like upstream's normal version
+identifier, HEAD alone does not describe uncommitted changes.
+
+The common version builder accepts this optional metadata pair (validated full
+Git object ID and unsigned Unix timestamp); with neither variable set, normal
+Linux and other platform builds retain their original Git lookup. Direct SCons
+builds from source archives may supply the pair themselves. The SDK source refresh
+runner still expects a Git checkout.
+
 `--environment psdk` expects an already-entered PSDK; `direct` expects explicit
 cross-toolchain options. These two paths have not been build-tested.
 

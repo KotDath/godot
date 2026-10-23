@@ -168,6 +168,21 @@ def get_version_info(module_version_string="", silent=False):
 def get_git_info():
     os.chdir(base_folder)
 
+    # Build runners can supply metadata from the source host when Git metadata
+    # is unavailable or stale in a remote/shared build environment.
+    source_hash = os.getenv("GODOT_BUILD_GIT_HASH")
+    source_timestamp = os.getenv("GODOT_BUILD_GIT_TIMESTAMP")
+    if source_hash is not None or source_timestamp is not None:
+        if source_hash is None or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source_hash) is None:
+            raise ValueError("GODOT_BUILD_GIT_HASH must be a full lowercase Git object ID")
+        if (
+            source_timestamp is None
+            or re.fullmatch(r"[0-9]+", source_timestamp) is None
+            or int(source_timestamp) > 2**64 - 1
+        ):
+            raise ValueError("GODOT_BUILD_GIT_TIMESTAMP must be an unsigned 64-bit Unix timestamp")
+        return {"git_hash": source_hash, "git_timestamp": str(int(source_timestamp))}
+
     # Parse Git hash if we're in a Git repo.
     git_hash = ""
     git_folder = ".git"

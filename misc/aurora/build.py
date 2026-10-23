@@ -8,9 +8,30 @@ build environment, without changing global sfdk configuration.
 import argparse
 import base64
 import json
+import os
 import subprocess
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+
+
+def source_provenance(root):
+    """Read Git on the source host, never through the SDK's cached shared view."""
+    if not (root / ".git").exists():
+        return {}
+    metadata = subprocess.check_output(
+        ["git", "show", "-s", "--format=%H%n%ct", "--no-show-signature", "HEAD"], cwd=root, text=True
+    )
+    revision, timestamp = metadata.strip().splitlines()
+    return {"GODOT_BUILD_GIT_HASH": revision, "GODOT_BUILD_GIT_TIMESTAMP": timestamp}
+
+
+def with_source_provenance(build, environment, provenance):
+    process_environment = {**os.environ, **provenance}
+    if environment == "sdk" and provenance:
+        # sfdk does not promise to forward arbitrary host environment variables.
+        # Execute env INSIDE the engine, preserving literal argv values.
+        build = build[:3] + ["env"] + [key + "=" + value for key, value in provenance.items()] + build[3:]
+    return build, process_environment
 
 
 def command(args, extra):
@@ -156,16 +177,25 @@ def main():
         build = command(args, extra)
     except ValueError as error:
         parser.error(str(error))
+    root = Path(__file__).resolve().parents[2]
+    provenance = source_provenance(root)
+    build, process_environment = with_source_provenance(build, args.environment, provenance)
     if args.dry_run:
         import shlex
 
-        print(shlex.join(build))
+        local_env = (
+            ["env"] + [key + "=" + value for key, value in provenance.items()]
+            if provenance and args.environment != "sdk"
+            else []
+        )
+        print(shlex.join(local_env + build))
         return
-    root = Path(__file__).resolve().parents[2]
+    if provenance:
+        print("Source revision:", provenance["GODOT_BUILD_GIT_HASH"], flush=True)
     if args.environment == "sdk":
         refresh_sdk_sources(args.sfdk, root)
     with sdk_generated_sources(args.sfdk, root) if args.environment == "sdk" else nullcontext():
-        subprocess.run(build, cwd=root, check=True)
+        subprocess.run(build, cwd=root, env=process_environment, check=True)
 
 
 if __name__ == "__main__":
