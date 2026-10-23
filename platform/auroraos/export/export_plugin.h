@@ -36,6 +36,14 @@
 class EditorExportPlatformAuroraOS : public EditorExportPlatform {
 	GDCLASS(EditorExportPlatformAuroraOS, EditorExportPlatform);
 	Ref<ImageTexture> logo;
+	int menu_options = 0;
+	String running_sfdk;
+	String running_device;
+	String running_pid;
+	String running_start;
+	Error sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output = nullptr);
+	Error stop_remote();
+	Error export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release);
 	String template_path(const Ref<EditorExportPreset> &p_preset, bool p_debug) const;
 
 public:
@@ -43,6 +51,12 @@ public:
 	String get_os_name() const override { return "AuroraOS"; }
 	Ref<Texture2D> get_logo() const override { return logo; }
 	void initialize() override;
+	bool poll_export() override;
+	int get_options_count() const override { return menu_options; }
+	bool is_option_runnable(int p_index) const override { return p_index == 0; }
+	String get_option_label(int p_index) const override;
+	String get_option_tooltip(int p_index) const override;
+	Error run(const Ref<EditorExportPreset> &p_preset, int p_device, BitField<DebugFlags> p_debug_flags) override;
 	void get_export_options(List<ExportOption> *r_options) const override;
 	void get_preset_features(const Ref<EditorExportPreset> &p_preset, List<String> *r_features) const override;
 	void get_platform_features(List<String> *r_features) const override;

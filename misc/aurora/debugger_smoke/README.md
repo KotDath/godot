@@ -25,8 +25,9 @@ An optional startup breakpoint is `--breakpoints res://main.gd:47` (line numbers
 are one-based; select a real executable line in the matching script).
 For a configured Aurora SDK device, `sfdk device exec DEVICE -- COMMAND ARGS...`
 is an available transport; it is independent of the debugger protocol.
-Do not put fixed PC addresses into production RPMs. Automatic export/deploy/run
-integration is still pending, and export flags requesting it remain rejected.
+Do not put fixed PC addresses into production RPMs. The desktop Aurora exporter also provides SDK Remote Deploy (see ../EXPORT.md).
+Standalone export flags requesting launch remain rejected; the Run path exports
+an embedded project and passes debug flags separately to the device process.
 
 ## Automated fixture
 

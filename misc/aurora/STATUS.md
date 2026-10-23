@@ -91,6 +91,35 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
   Vulkan probe also has an empty-private-directory validator warning; game RPMs
   have only the non-Silica warning. No root-CA trust verification was performed.
 
+## SDK deploy integration
+
+- The desktop exporter now supports optional Regular signing and Remote Deploy
+  through sfdk, with device/key/certificate paths in local Editor Settings.
+  Run and Stop use SDK device commands; no audb dependency is added to the product.
+- Linux editor builds. A real editor-menu integration run on registered
+  `KVADRA_T (ARM 64bit)` exports, validates, signs, installs and launches the
+  GDExtension test project. It renders the 3D scene, returns 42 from the native
+  dependency chain, records touch input, connects to the PC debugger and stops
+  its own process. Device PID termination was independently checked. A second
+  deployment updates successfully, reconnects to the debugger, and preserves the
+  in-game persisted launch counter (1 → 2). An ARM32 preset on the ARM64 device
+  is rejected before export/installation. Standalone signed headless export
+  also passes and retains the preset release (the development suffix is Run-only).
+- SDK deployment requires a complete RPM filename. Aurora rejects the same
+  package version/release on reinstall, so Remote Deploy adds a unique development
+  release suffix without changing the saved preset. Temporary packages are cleaned.
+- SDK invocations use argv-based pipes: the captured-output OS::execute Unix path
+  would otherwise expand shell variables on the host. No original Linux code was
+  changed for this fix.
+- Signature: SDK public Regular development certificate; no root-CA trust check.
+  Regular validation has the existing non-Silica warning only. Installation may
+  require confirming the SDK dialog on the device.
+- Still pending: interactive encrypted-key signing, cancellation while an SDK
+  command runs, connection-loss recovery, normal launcher/sandbox acceptance,
+  ARM32 hardware, and native GDB. This is a developer launch through SDK.
+- Setup and limits: [EXPORT.md](EXPORT.md); opt-in integration fixture:
+  [deploy_smoke/README.md](deploy_smoke/README.md).
+
 ## Runtime findings
 
 KVADRA provides wl_shell, qt_surface_extension, text-input-v2, viewporter,
@@ -115,8 +144,7 @@ libxkbcommon is bundled with its license because it is not Regular public API.
   and editor text entry; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
-- Transport-independent one-click deployment (SDK first), automatic remote-debug
-  launch flags, signing UI,
+- Broader deployment recovery/cancellation and encrypted-key signing UI;
   Windows/macOS host packaging and broader RPM layout support.
 - PSDK and BT build validation, Vulkan hardware presentation, ARM32 occlusion
   backend, broader Embree performance/editor checks, hot reload.

@@ -38,11 +38,51 @@
 #include "core/io/file_access.h"
 #include "core/os/os.h"
 #include "core/os/shared_object.h"
+#include "editor/editor_node.h"
+#include "editor/export/editor_export.h"
 #include "editor/export/editor_export_preset.h"
+#include "editor/settings/editor_settings.h"
 
 #include "modules/svg/image_loader_svg.h"
 
 namespace {
+// OS::execute with captured output uses a host shell on Unix. Use argv-based
+// execution so SDK paths and device scripts remain literal arguments.
+Error execute_sdk(const String &p_path, const List<String> &p_arguments, String *r_output, int *r_exit_code) {
+	Dictionary process = OS::get_singleton()->execute_with_pipe(p_path, p_arguments, false);
+	ERR_FAIL_COND_V(process.is_empty(), ERR_CANT_FORK);
+	Ref<FileAccess> out = process["stdio"];
+	Ref<FileAccess> err = process["stderr"];
+	ProcessID pid = process["pid"];
+	Vector<uint8_t> stdout_bytes;
+	Vector<uint8_t> stderr_bytes;
+	auto read_pipe = [](const Ref<FileAccess> &p_pipe, Vector<uint8_t> &r_bytes) {
+		uint8_t buffer[4096];
+		uint64_t count = p_pipe->get_buffer(buffer, sizeof(buffer));
+		if (count > 0) {
+			int64_t offset = r_bytes.size();
+			r_bytes.resize(offset + count);
+			memcpy(r_bytes.ptrw() + offset, buffer, count);
+		}
+		return count;
+	};
+	while (true) {
+		bool running = OS::get_singleton()->is_process_running(pid);
+		uint64_t count = read_pipe(out, stdout_bytes) + read_pipe(err, stderr_bytes);
+		if (!running && count == 0) {
+			break;
+		}
+		if (count == 0) {
+			OS::get_singleton()->delay_usec(1000);
+		}
+	}
+	*r_exit_code = OS::get_singleton()->get_process_exit_code(pid);
+	*r_output = String::utf8((const char *)stdout_bytes.ptr(), stdout_bytes.size()) + String::utf8((const char *)stderr_bytes.ptr(), stderr_bytes.size());
+	return OK;
+}
+String shell_quote(const String &p_value) {
+	return "'" + p_value.replace("'", "'\"'\"'") + "'";
+}
 Error write_text(const String &p_path, const char *p_text) {
 	Error error;
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE, &error);
@@ -85,6 +125,8 @@ void EditorExportPlatformAuroraOS::get_export_options(List<ExportOption> *r_opti
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "sdk/target"), ""));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "sdk/python"), "python3"));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "sdk/patchelf", PROPERTY_HINT_GLOBAL_FILE), "patchelf"));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "signing/enabled"), false));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "remote_deploy/enabled"), false));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "textures/etc2_astc"), true));
 }
 
@@ -149,6 +191,10 @@ bool EditorExportPlatformAuroraOS::has_valid_project_configuration(const Ref<Edi
 }
 
 Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify) {
+	return export_project_internal(p_preset, p_debug, p_path, p_flags, p_notify, p_preset->get("package/release"));
+}
+
+Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release) {
 	ExportNotifier notifier(*this, p_preset, p_debug, p_path, p_flags, p_notify);
 	String configuration_error;
 	bool missing_templates = false;
@@ -206,7 +252,7 @@ Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset>
 	String rpm_arch = arch == "arm32" ? "armv7hl" : "aarch64";
 	String name = p_preset->get("package/unique_name");
 	String version = p_preset->get("package/version");
-	String release = p_preset->get("package/release");
+	String release = p_release;
 	List<String> arguments;
 	for (const String &argument : { String("engine"), String("exec"), String("sb2"), String("-t"), String(p_preset->get("sdk/target")), String("-m"), String("sdk-build"), String(p_preset->get("sdk/python")), stage_path.path_join("package.py") }) {
 		arguments.push_back(argument);
@@ -242,7 +288,7 @@ Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset>
 	}
 	String output;
 	int exit_code = -1;
-	error = OS::get_singleton()->execute(p_preset->get("sdk/sfdk"), arguments, &output, &exit_code, true);
+	error = execute_sdk(p_preset->get("sdk/sfdk"), arguments, &output, &exit_code);
 	if (error != OK || exit_code != 0) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora RPM", "SDK packaging failed. Templates and output directory must be visible in the SDK shared workspace.\n" + output);
 		return error != OK ? error : ERR_CANT_CREATE;
@@ -254,7 +300,7 @@ Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset>
 	}
 	output = String();
 	exit_code = -1;
-	error = OS::get_singleton()->execute(p_preset->get("sdk/sfdk"), validation_arguments, &output, &exit_code, true);
+	error = execute_sdk(p_preset->get("sdk/sfdk"), validation_arguments, &output, &exit_code);
 	if (error != OK || (exit_code != 0 && exit_code != 2)) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora validation", output);
 		return error != OK ? error : ERR_INVALID_DATA;
@@ -262,11 +308,181 @@ Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset>
 	if (exit_code == 2 || output.contains("WARNING")) {
 		add_message(EXPORT_MESSAGE_WARNING, "Aurora validation", output);
 	}
+	if (bool(p_preset->get("signing/enabled"))) {
+		String key = EDITOR_GET("export/auroraos/signing_key");
+		String cert = EDITOR_GET("export/auroraos/signing_certificate");
+		if (!FileAccess::exists(key) || !FileAccess::exists(cert)) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora signing", "Set the signing key and certificate in Editor Settings > Export > AuroraOS.");
+			return ERR_UNCONFIGURED;
+		}
+		// This synchronous SDK path cannot safely prompt for a passphrase.
+		if (FileAccess::get_file_as_string(key).contains("ENCRYPTED")) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora signing", "Encrypted keys require external interactive signing; disable signing for this export.");
+			return ERR_UNAVAILABLE;
+		}
+		String sfdk = p_preset->get("sdk/sfdk");
+		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "info", cert }, "Aurora certificate", &output);
+		if (error != OK) {
+			return error;
+		}
+		if (!output.contains("Subgroup: regular")) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora signing", "This exporter validates the Regular profile; select a Regular developer certificate.");
+			return ERR_INVALID_DATA;
+		}
+		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "dump", rpm }, "Aurora signature inspection");
+		if (error != OK) {
+			return error;
+		}
+		// A freshly built staged RPM is signed without --force. Existing output
+		// packages are not modified if signing fails.
+		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "sign", "--key", key, "--cert", cert, rpm }, "Aurora signing");
+		if (error != OK) {
+			return error;
+		}
+		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "dump", rpm }, "Aurora signature", &output);
+		if (error != OK) {
+			return error;
+		}
+		add_message(EXPORT_MESSAGE_INFO, "Aurora signature", output + "\nRoot-CA trust verification was not performed.");
+	}
 	error = DirAccess::copy_absolute(rpm, destination);
 	if (error != OK) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora RPM", "Could not copy the completed RPM to " + destination);
 	} else {
-		add_message(EXPORT_MESSAGE_INFO, "Aurora RPM", "Unsigned RPM created and validated for the Regular profile. Sign it with a matching certificate before installation.");
+		add_message(EXPORT_MESSAGE_INFO, "Aurora RPM", bool(p_preset->get("signing/enabled")) ? "Signed RPM created and validated for the Regular profile." : "Unsigned RPM created and validated for the Regular profile. Sign it with a matching certificate before installation.");
 	}
 	return error;
+}
+
+Error EditorExportPlatformAuroraOS::sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output) {
+	String output;
+	int exit_code = -1;
+	Error error = execute_sdk(p_sfdk, p_arguments, &output, &exit_code);
+	if (r_output) {
+		*r_output = output;
+	}
+	if (error != OK || exit_code != 0) {
+		add_message(EXPORT_MESSAGE_ERROR, p_stage, "SDK command failed (exit " + itos(exit_code) + ").\n" + output);
+		return error != OK ? error : FAILED;
+	}
+	return OK;
+}
+
+bool EditorExportPlatformAuroraOS::poll_export() {
+	Ref<EditorExportPreset> preset = EditorExport::get_singleton()->get_runnable_preset_for_platform(this);
+	int previous = menu_options;
+	menu_options = (preset.is_valid() && bool(preset->get("remote_deploy/enabled"))) ? 1 : 0;
+	if (!running_pid.is_empty()) {
+		menu_options = 2;
+	}
+	return previous != menu_options;
+}
+
+String EditorExportPlatformAuroraOS::get_option_label(int p_index) const {
+	return p_index == 0 ? "Run on Aurora SDK device" : "Stop Aurora project";
+}
+
+String EditorExportPlatformAuroraOS::get_option_tooltip(int p_index) const {
+	return p_index == 0 ? "Export, sign, install and launch on the device selected in Editor Settings > Export > AuroraOS" : "Stop only the process launched by this editor session; keep the installed package and user data";
+}
+
+Error EditorExportPlatformAuroraOS::stop_remote() {
+	if (running_pid.is_empty()) {
+		return OK;
+	}
+	// Compare the kernel start time as well as PID to avoid stopping a reused PID.
+	String script = "test ! -r /proc/" + running_pid + "/stat || { test \"$(awk '{print $22}' /proc/" + running_pid + "/stat)\" != " + shell_quote(running_start) + " || kill " + running_pid + "; }";
+	Error error = sdk_command(running_sfdk, { "device", "exec", running_device, "--", "sh", "-c", script }, "Aurora stop");
+	if (error == OK) {
+		running_pid = String();
+		running_start = String();
+	}
+	return error;
+}
+
+Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset, int p_device, BitField<DebugFlags> p_debug_flags) {
+	ERR_FAIL_COND_V(p_device < 0 || p_device > 1, ERR_INVALID_PARAMETER);
+	if (p_device == 1) {
+		return stop_remote();
+	}
+	String device = EDITOR_GET("export/auroraos/device");
+	if (device.is_empty() || !bool(p_preset->get("signing/enabled"))) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora deploy", "Select an SDK device in Editor Settings and enable signing in the export preset.");
+		return ERR_UNCONFIGURED;
+	}
+	if (p_debug_flags.has_flag(DEBUG_FLAG_DUMB_CLIENT) || p_debug_flags.has_flag(DEBUG_FLAG_REMOTE_DEBUG_LOCALHOST)) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora deploy", "Remote filesystem and localhost forwarding are not supported. Use an embedded project and a PC debug address reachable from the device.");
+		return ERR_UNAVAILABLE;
+	}
+	EditorProgress progress("aurora_run", "Running on Aurora OS", 4);
+	String sfdk = p_preset->get("sdk/sfdk");
+	String machine;
+	Error error = sdk_command(sfdk, { "device", "exec", device, "--", "uname", "-m" }, "Aurora device", &machine);
+	if (error != OK) {
+		return error;
+	}
+	String arch = p_preset->get("binary_format/architecture");
+	if (machine.strip_edges() != (arch == "arm32" ? "armv7l" : "aarch64")) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora device", "Device architecture does not match the export preset: " + machine);
+		return ERR_INVALID_DATA;
+	}
+	// Keep staging within the project shared with the SDK, not host /tmp.
+	String stage = ProjectSettings::get_singleton()->globalize_path("res://.godot/aurora-deploy").path_join(itos(OS::get_singleton()->get_process_id()) + "-" + uitos(OS::get_singleton()->get_ticks_usec()));
+	error = DirAccess::make_dir_recursive_absolute(stage);
+	ERR_FAIL_COND_V(error != OK, error);
+	StagingDirectory staging{ stage };
+	// Aurora rejects reinstalling the same NEVRA. Give each development deploy
+	// a new RPM release without changing the saved export preset.
+	String deploy_release = String(p_preset->get("package/release")) + ".godot." + uitos(uint64_t(OS::get_singleton()->get_unix_time() * 1000000.0));
+	String rpm_name = String(p_preset->get("package/unique_name")) + "-" + String(p_preset->get("package/version")) + "-" + deploy_release + "." + (arch == "arm32" ? "armv7hl" : "aarch64") + ".rpm";
+	ERR_FAIL_COND_V(rpm_name != rpm_name.validate_filename(), ERR_INVALID_PARAMETER);
+	String rpm = stage.path_join(rpm_name);
+	if (progress.step("Exporting and signing RPM", 0)) {
+		return ERR_SKIP;
+	}
+	error = export_project_internal(p_preset, true, rpm, 0, true, deploy_release);
+	if (error != OK) {
+		return error;
+	}
+	if (progress.step("Stopping previous project", 1)) {
+		return ERR_SKIP;
+	}
+	error = stop_remote();
+	if (error != OK) {
+		return error;
+	}
+	if (progress.step("Installing RPM through SDK", 2)) {
+		return ERR_SKIP;
+	}
+	error = sdk_command(sfdk, { "-c", "device=" + device, "deploy", "--sdk", "--keepUserData", "--", rpm }, "Aurora installation");
+	if (error != OK) {
+		return error;
+	}
+	if (progress.step("Launching debug project", 3)) {
+		return ERR_SKIP;
+	}
+	String command = shell_quote("/usr/bin/" + String(p_preset->get("package/unique_name")));
+	for (const String &argument : gen_export_flags(p_debug_flags)) {
+		command += " " + shell_quote(argument);
+	}
+	// SDK developer launch, not the application launcher's sandbox context.
+	String script = "umask 077; mkdir -p \"$HOME/.cache/godot-aurora\" || exit 1; nohup " + command + " >\"$HOME/.cache/godot-aurora/" + String(p_preset->get("package/unique_name")) + ".log\" 2>&1 </dev/null & app_pid=$!; sleep 1; test -r /proc/$app_pid/stat || exit 1; printf 'GODOT_AURORA_PID:%s:%s\\n' \"$app_pid\" \"$(awk '{print $22}' /proc/$app_pid/stat)\"";
+	String output;
+	error = sdk_command(sfdk, { "device", "exec", device, "--", "sh", "-c", script }, "Aurora launch", &output);
+	if (error != OK) {
+		return error;
+	}
+	for (const String &line : output.split("\n")) {
+		PackedStringArray fields = line.strip_edges().split(":");
+		if (fields.size() == 3 && fields[0] == "GODOT_AURORA_PID" && fields[1].is_valid_int() && fields[1].to_int() > 1 && fields[2].is_valid_int()) {
+			running_sfdk = sfdk;
+			running_device = device;
+			running_pid = fields[1];
+			running_start = fields[2];
+			add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Started PID " + running_pid + " on " + device + ". Log: ~/.cache/godot-aurora/" + String(p_preset->get("package/unique_name")) + ".log");
+			return OK;
+		}
+	}
+	add_message(EXPORT_MESSAGE_ERROR, "Aurora launch", "SDK did not return a process identifier. Check ~/.cache/godot-aurora on the device.\n" + output);
+	return FAILED;
 }
