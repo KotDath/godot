@@ -6,6 +6,7 @@ and device smoke tests. No signing credentials are read here.
 """
 
 import argparse
+import hashlib
 import json
 import re
 import shlex
@@ -66,12 +67,34 @@ def validate_native(files, arch):
     return manifest
 
 
+def append_pck(executable, pck, expected_sha256=None):
+    """Count copied bytes: SDK fakeowner can report a stale source st_size."""
+    with pck.open("rb") as source:
+        if source.read(4) != b"GDPC":
+            raise ValueError("Not a Godot PCK: " + str(pck))
+        source.seek(0)
+        size = 0
+        digest = hashlib.sha256()
+        with executable.open("ab") as destination:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                destination.write(chunk)
+                size += len(chunk)
+                digest.update(chunk)
+            if expected_sha256 and digest.hexdigest() != expected_sha256.lower():
+                raise ValueError("PCK SHA256 mismatch: SDK may see stale/truncated shared files; refresh the SDK copy")
+            destination.write(struct.pack("<Q4s", size, b"GDPC"))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--project", type=Path, help="Unpacked development project (editor binary only)")
     source.add_argument("--pck", type=Path, help="Embed a game PCK without enabling path overrides")
+    parser.add_argument("--pck-sha256", help="PCK SHA256 calculated on the export host; detects stale SDK reads")
     parser.add_argument("--strip", default="strip", help="Target strip executable for embedded-PCK packages")
     parser.add_argument("--native-dir", type=Path)
     parser.add_argument("--probe", type=Path)
@@ -91,6 +114,8 @@ def main():
     parser.add_argument("--release", default="1")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.pck_sha256 is not None and (not args.pck or not re.fullmatch(r"[0-9a-fA-F]{64}", args.pck_sha256)):
+        parser.error("--pck-sha256 requires --pck and a 64-digit hexadecimal digest")
     for value in (args.name, args.version, args.release):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+]*", value):
             parser.error("Invalid package name/version/release")
@@ -161,9 +186,7 @@ def main():
             # RPM's strip/debug extraction must not truncate the appended PCK.
             # Strip first, then append using Godot's self-contained footer.
             subprocess.run([args.strip, "--strip-unneeded", str(launcher)], check=True)
-            with launcher.open("ab") as destination, args.pck.open("rb") as source:
-                shutil.copyfileobj(source, destination)
-                destination.write(struct.pack("<Q4s", args.pck.stat().st_size, b"GDPC"))
+            append_pck(launcher, args.pck, args.pck_sha256)
         installed_manifest = {args.name: elf_info(launcher)}
         installed_manifest.update({path.name: elf_info(path) for path in native.iterdir()})
         (data / "native-manifest.json").write_text(json.dumps(installed_manifest, indent=2) + "\n")

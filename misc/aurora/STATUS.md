@@ -27,7 +27,7 @@ This is an experimental port, not a production release.
 - Linux X11 graphical smoke test under Xvfb/llvmpipe passes and returns 42 from
   the host GDExtension. Linux Wayland hardware regression test is still pending.
 - A real export with a mismatched template architecture fails without producing
-  an RPM. Five packaging boundary tests pass. The embedded PCK survives RPM processing
+  an RPM. Eight packaging boundary tests pass. The embedded PCK survives RPM processing
   byte-for-byte. Exported ARM packages contain only the selected target DSOs.
 
 Regular validator: no errors, one non-Silica desktop warning. Test RPMs use
@@ -55,6 +55,42 @@ installation results were checked; root-CA verification was not performed
   interaction with this update is not yet retested. ARM32 editor and release
   artifacts still need rebuilding to include this update.
 
+## Prioritized continuation
+
+Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
+[IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md). No shared Wayland extraction.
+
+- Vulkan opt-in (`vulkan=yes extra_suffix=vulkan`) compiles for ARM32 and ARM64 with bundled
+  headers/glslang and dynamic Volk loading. GLES remains the default.
+- On KVADRA, the signed probe confirms missing libvulkan.so/.so.1 and no Vulkan
+  entry points in the installed Mali library. Hardware WSI/renderer validation
+  needs a compatible vendor runtime or another Aurora device; see [VULKAN.md](VULKAN.md).
+- The Vulkan-enabled ARM64 engine, explicitly launched with `--rendering-method
+  mobile --rendering-driver vulkan`, falls back to GLES on KVADRA and displays the
+  mobile fixture (RPM 4.7.2-8). This is a fallback test, not Vulkan rendering.
+- Added four-second stereo tone and lifecycle timing to the mobile fixture.
+  PulseAudio routes Godot's stream to physical sink 3 (rockchipes8326c), uncorked
+  and unmuted; start/finish events succeed. Physical audibility, headphones and
+  lock/unlock are still pending. System stream volume was low and was not changed.
+- Reproduced SDK fakeowner truncation of a host-updated PCK (3648 versus 5376
+  bytes). Packaging now counts copied bytes and accepts the host SHA256, supplied
+  by the desktop exporter, to reject stale/truncated reads. Refreshed the SDK copy;
+  RPM 4.7.2-8's embedded PCK matches the host source byte-for-byte and runs.
+
+- ARM64 Embree opt-in compiles after an Aurora-only third-party compiler flag.
+  On KVADRA the occlusion fixture reports **102 → 2 → 102** rendered objects;
+  the host negative control without the module reports 102 → 102 → 102 and fails.
+  ARM32 remains unsupported by upstream Embree; the default profile is unchanged.
+- Native Godot TCP remote debugging passes on KVADRA: connect, breakpoint, next,
+  continue, and restart/reconnect; both debug runs preserve the occlusion PASS.
+  See [debugger_smoke/README.md](debugger_smoke/README.md). This verifies a developer
+  launch, not normal launcher/sandbox context or one-click deploy. Profiler data,
+  variable inspection UI, Remote Scene Tree and native GDB are not yet validated.
+- Desktop Linux editor rebuild and a real ARM64 debug export pass with host PCK
+  SHA256 verification. Test RPMs remain public-development-signed only. The small
+  Vulkan probe also has an empty-private-directory validator warning; game RPMs
+  have only the non-Silica warning. No root-CA trust verification was performed.
+
 ## Runtime findings
 
 KVADRA provides wl_shell, qt_surface_extension, text-input-v2, viewporter,
@@ -79,12 +115,14 @@ libxkbcommon is bundled with its license because it is not Regular public API.
   and editor text entry; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
-- One-click deployment through audb, remote-debug launch flags, signing UI,
+- Transport-independent one-click deployment (SDK first), automatic remote-debug
+  launch flags, signing UI,
   Windows/macOS host packaging and broader RPM layout support.
-- PSDK and BT build validation, Vulkan, raycast/occlusion culling, hot reload.
-- Shared Wayland directory extraction: current implementation reuses linuxbsd
-  sources with small hooks, while Aurora-specific shell policy is isolated in
-  `platform/auroraos/legacy_shell.*`.
+- PSDK and BT build validation, Vulkan hardware presentation, ARM32 occlusion
+  backend, broader Embree performance/editor checks, hot reload.
+- Keep Linux changes minimal: reuse existing Wayland sources with small guarded
+  hooks; do not extract a new shared Wayland layer (user decision).
+- Detailed implementation and priority order: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
 
 ## Reproduction and SDK mount caveat
 

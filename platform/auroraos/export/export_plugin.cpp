@@ -217,6 +217,7 @@ Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset>
 	};
 	option("--binary", template_path(p_preset, p_debug));
 	option("--pck", pack_path);
+	option("--pck-sha256", FileAccess::get_sha256(pack_path));
 	option("--arch", arch);
 	option("--name", name);
 	option("--title", p_preset->get("package/name"));

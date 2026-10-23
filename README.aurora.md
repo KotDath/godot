@@ -8,6 +8,8 @@
 - [Сборка и bootstrap Python/SCons](misc/aurora/README.md)
 - [Что действительно проверено и что осталось](misc/aurora/STATUS.md)
 - [Архитектурный план](misc/aurora/PLAN.md)
+- [Подробный план продолжения и приоритеты](misc/aurora/IMPLEMENTATION_ROADMAP.md)
+- [Экспериментальная Vulkan-сборка и ограничения устройства](misc/aurora/VULKAN.md)
 - [Адаптация godot-cpp и пример цепочки SO](https://github.com/KotDath/godot-cpp/tree/4.7.2_auroraos/examples/aurora_dependency_chain)
 
 На Квадре ARM64 проверены установка RPM, графический запуск игры через

@@ -92,4 +92,12 @@ def configure(env):
     if env["opengl3"]:
         env.Append(CPPDEFINES=["GLES3_ENABLED"])
     if env["vulkan"]:
-        raise RuntimeError("Aurora Vulkan support is not validated yet; use vulkan=no")
+        if not env["wayland"]:
+            raise RuntimeError("Aurora Vulkan currently requires wayland=yes")
+        # Opt-in only until device WSI/rotation validation is complete. Keep the
+        # existing Linux backend and its build configuration unchanged.
+        env.Append(CPPDEFINES=["VULKAN_ENABLED", "RD_ENABLED", "VK_USE_PLATFORM_WAYLAND_KHR"])
+        if not env["use_volk"]:
+            pkg_config("vulkan")
+        if not env["builtin_glslang"]:
+            env.Append(LIBS=["glslang", "SPIRV", "glslang-default-resource-limits"])

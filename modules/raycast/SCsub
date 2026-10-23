@@ -98,6 +98,9 @@ if env["builtin_embree"]:
         # Flags synced with upstream gnu.cmake.
         if env["arch"] == "arm64" and env["platform"] == "linuxbsd" and not env["use_llvm"]:
             env_thirdparty.Append(CXXFLAGS=["-flax-vector-conversions"])
+        elif env["arch"] == "arm64" and env["platform"] == "auroraos":
+            # Aurora SDK GCC needs the same Embree NEON vector conversions.
+            env_thirdparty.Append(CXXFLAGS=["-flax-vector-conversions"])
 
         env_thirdparty.Append(
             CXXFLAGS=[

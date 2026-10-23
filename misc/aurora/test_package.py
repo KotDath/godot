@@ -1,6 +1,8 @@
 """Boundary checks for RPM native dependency validation (no SDK required)."""
 
+import hashlib
 import importlib.util
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,46 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location("aurora_package", Path(__file__).with_name("package.py"))
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
+
+
+class EmbeddedPackTests(unittest.TestCase):
+    def test_rejects_truncated_sdk_view_of_pack(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "game"
+            pck = Path(directory) / "game.pck"
+            payload = b"GDPC" + b"resource data"
+            executable.write_bytes(b"ELF")
+            pck.write_bytes(payload[:-3])
+            with self.assertRaisesRegex(ValueError, "PCK SHA256 mismatch"):
+                package.append_pck(executable, pck, hashlib.sha256(payload).hexdigest())
+
+    def test_footer_uses_copied_bytes_with_stale_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "game"
+            pck = Path(directory) / "game.pck"
+            prefix = b"ELF placeholder"
+            payload = b"GDPC" + b"resources" * 150000
+            executable.write_bytes(prefix)
+            pck.write_bytes(payload)
+            # Models fakeowner reporting the old size after a host-side export.
+            with patch.object(Path, "stat") as stat:
+                stat.return_value.st_size = 3648
+                package.append_pck(executable, pck, hashlib.sha256(payload).hexdigest())
+            result = executable.read_bytes()
+            size, magic = struct.unpack("<Q4s", result[-12:])
+            self.assertEqual(magic, b"GDPC")
+            self.assertEqual(result[-12 - size : -12], payload)
+            self.assertEqual(result[: -12 - size], prefix)
+
+    def test_invalid_pack_leaves_executable_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "game"
+            pck = Path(directory) / "game.pck"
+            executable.write_bytes(b"original")
+            pck.write_bytes(b"not a PCK")
+            with self.assertRaisesRegex(ValueError, "Not a Godot PCK"):
+                package.append_pck(executable, pck)
+            self.assertEqual(executable.read_bytes(), b"original")
 
 
 class NativeValidationTests(unittest.TestCase):

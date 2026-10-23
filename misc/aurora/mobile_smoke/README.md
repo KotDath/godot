@@ -71,3 +71,12 @@ KVADRA ARM64, SDK 5.2.1.200, test package `ru.kotdath.godotmobile-4.7.2-5`:
   using SDK public development signing credentials, not production credentials.
 
 ARM32: debug template compilation passes; no hardware supplied yet.
+
+## Audio and lifecycle diagnostics
+
+The “Play stereo tone (4 seconds)” button plays 440 Hz at -18 dB: two seconds
+left, then two seconds right, with short fades. A changed `user://audio.txt` value
+starting with `play` triggers the same test. `MOBILE_AUDIO` records start/end and
+the selected driver; lifecycle records include monotonic time and maximum frame
+gap. A completed stream or a PulseAudio sink route does not prove audible sound.
+Physical listening, headset changes and lock/unlock remain separate checks.
