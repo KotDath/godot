@@ -65,10 +65,17 @@ bool OS_AuroraOS::_check_internal_feature_support(const String &p_feature) {
 static String xdg_path(const char *p_variable, const char *p_fallback) {
 	OS *os = OS::get_singleton();
 	String value = os->get_environment(p_variable);
-	if (value.is_absolute_path()) {
-		return value;
+	if (!value.is_absolute_path()) {
+		value = os->get_environment("HOME").path_join(p_fallback);
 	}
-	return os->get_environment("HOME").path_join(p_fallback);
+	// Aurora's launcher grants persistent storage to the RPM application ID,
+	// not the shared Godot directory. Keep standalone development binaries on
+	// ordinary XDG paths; installed editors and games use their own namespace.
+	String application_id = os->get_executable_path().get_file();
+	if (FileAccess::exists(String("/usr/share/applications").path_join(application_id + ".desktop"))) {
+		value = value.path_join(application_id);
+	}
+	return value;
 }
 
 String OS_AuroraOS::get_config_path() const {

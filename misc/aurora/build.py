@@ -9,6 +9,7 @@ import argparse
 import base64
 import json
 import subprocess
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 
@@ -79,6 +80,63 @@ print("SDK shared sources refreshed:", count)
     )
 
 
+@contextmanager
+def sdk_generated_sources(sfdk, root):
+    """Regenerate configuration-dependent outputs and restore the host variants.
+
+    SCons signatures are platform-specific, but these generated paths are not.
+    A cached target build can otherwise reuse the host module list or Wayland
+    wrappers. Concurrent builds in the same checkout are unsupported.
+    """
+    directory = root / "platform/linuxbsd/wayland/protocol"
+    generated = set(directory.glob("*.gen.h")) | set(directory.glob("*.gen.c"))
+    for pattern in (
+        "modules/*.gen.h",
+        "modules/*.gen.cpp",
+        "core/disabled_classes.gen.h",
+        "core/version_generated.gen.h",
+        "core/version_hash.gen.cpp",
+        "core/script_encryption_key.gen.cpp",
+        "editor/export/register_exporters.gen.cpp",
+        "editor/doc/doc_data*.gen.h",
+    ):
+        generated.update(root.glob(pattern))
+    saved = {str(path.relative_to(root)): path.read_bytes() for path in sorted(generated)}
+    if not saved:
+        yield
+        return
+    remove_script = """
+import json, pathlib, sys
+for name in json.load(sys.stdin):
+    path = pathlib.Path(name)
+    if path.exists():
+        path.unlink()
+"""
+    restore_script = """
+import base64, json, pathlib, sys
+for name, encoded in json.load(sys.stdin).items():
+    pathlib.Path(name).write_bytes(base64.b64decode(encoded))
+"""
+    print("Temporarily regenerating configuration-dependent sources for Aurora", flush=True)
+    try:
+        subprocess.run(
+            [sfdk, "engine", "exec", "python3", "-c", remove_script],
+            cwd=root,
+            input=json.dumps(list(saved)).encode(),
+            check=True,
+        )
+        yield
+    finally:
+        payload = {name: base64.b64encode(data).decode("ascii") for name, data in saved.items()}
+        subprocess.run(
+            [sfdk, "engine", "exec", "python3", "-c", restore_script],
+            cwd=root,
+            input=json.dumps(payload).encode(),
+            check=True,
+        )
+        print("Restored host generated sources", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", choices=("sdk", "psdk", "direct"), default="sdk")
@@ -106,7 +164,8 @@ def main():
     root = Path(__file__).resolve().parents[2]
     if args.environment == "sdk":
         refresh_sdk_sources(args.sfdk, root)
-    subprocess.run(build, cwd=root, check=True)
+    with sdk_generated_sources(args.sfdk, root) if args.environment == "sdk" else nullcontext():
+        subprocess.run(build, cwd=root, check=True)
 
 
 if __name__ == "__main__":

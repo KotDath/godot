@@ -21,7 +21,7 @@ This is an experimental port, not a production release.
   through `audb` on KVADRA ARM64. It renders a rotating
   cube and text using GLES 3.2 / Mali-G610, loads extension → middle.so → leaf.so
   and returns 42. The on-screen touch counter and log recorded button presses.
-- Aurora ARM64 editor opens a writable copy of the same project and shows its
+- Initial Aurora ARM64 editor opens a package-backed copy of the same project and shows its
   3D viewport without environment overrides (test RPM 4.7.2-8). The XDG-only
   embedding proxy is disabled by default for Aurora.
 - Linux X11 graphical smoke test under Xvfb/llvmpipe passes and returns 42 from
@@ -52,7 +52,7 @@ installation results were checked; root-CA verification was not performed
   X11 smoke test under Xvfb/llvmpipe again loads the dependency chain and returns 42.
 - See [mobile_smoke/README.md](mobile_smoke/README.md) for architecture,
   reproduction and limits. The updated ARM64 editor also compiles; device editor
-  interaction with this update is not yet retested. ARM32 editor and release
+  workflow has now been tested as described below. ARM32 editor and release
   artifacts still need rebuilding to include this update.
 
 ## Prioritized continuation
@@ -120,6 +120,44 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
 - Setup and limits: [EXPORT.md](EXPORT.md); opt-in integration fixture:
   [deploy_smoke/README.md](deploy_smoke/README.md).
 
+## Device editor workflow
+
+- ARM64 editor RPM `ru.kotdath.godoteditor` 4.7.2-6 on KVADRA: GUI project
+  creation/icon import, scene creation/save, script attachment, Latin/Cyrillic
+  CodeEdit input, Run Current Scene, rendering and Stop pass. A project created
+  outside the sandbox was copied into the app's persistent project directory,
+  imported through Project Manager, edited/saved under the normal launcher,
+  reopened after an RPM update and run again. The saved script comment persists.
+- The normal launcher/firejail run starts a separate game process, connects the
+  loopback debugger, forwards the script output and displays Remote Scene Tree.
+  Stop terminates that process (checked independently using its device PID).
+  The shell currently requires manually choosing the child app card to foreground
+  the game; automatic activation and app-cover previews remain incomplete.
+- An EditorPlugin calls the installed GDExtension → middle.so → leaf.so chain
+  and gets 42 both in a developer launch and the normal sandbox. This verifies
+  native calls in tool context, not native hot reload or compilation on device.
+- Fixed Project Manager's narrow window and the editor's shifted viewport:
+  legacy shell maintains maximized/fullscreen state, and rejected client resize
+  requests report the actual logical rectangle back to Window. The regression
+  plugin confirms a 2000×1200 root viewport before/after a 1024×600 resize request.
+  Linux behavior is unchanged behind Aurora-only hooks; no shared layer extracted.
+- Installed RPM applications now keep XDG data/config/cache under their application
+  ID. The editor defaults projects to `~/.local/share/<application-id>/projects`.
+  Earlier experimental files are left in their original locations; import/copy
+  them explicitly. Standalone binaries retain ordinary XDG storage paths.
+- Editor RPMs need `Internet` permission for local TCP debugger/language-server
+  sockets. Without it the normal sandbox rejects socket creation. The tested
+  editor uses `Audio;UserDirs;Internet`; game presets keep their explicit permissions.
+- Fixed alternating SDK/Linux builds reusing incompatible generated protocol and
+  module/export/doc files. The SDK runner regenerates configuration-dependent
+  files and restores host outputs, including on failure. Two runner boundary
+  tests pass, ARM64 editor and subsequent Linux editor builds pass; eight existing
+  packaging tests also pass. Concurrent builds still require separate worktrees.
+- Reproduction and opt-in plugin: [editor_smoke/README.md](editor_smoke/README.md).
+  Multiline IME commits still discard newline/tab; Enter-key editing works.
+  Surrounding text/selection/prediction, keyboard occlusion of dialogs, broader
+  editor operations and ARM32 hardware remain pending.
+
 ## Runtime findings
 
 KVADRA provides wl_shell, qt_surface_extension, text-input-v2, viewporter,
@@ -141,7 +179,7 @@ libxkbcommon is bundled with its license because it is not Regular public API.
 ## Remaining work
 
 - Full IME surrounding-text synchronization, predictive edits/selection
-  and editor text entry; lock/unlock and broader lifecycle testing; audible
+  and multiline editor text insertion; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
 - Broader deployment recovery/cancellation and encrypted-key signing UI;

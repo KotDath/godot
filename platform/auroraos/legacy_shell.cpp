@@ -125,6 +125,11 @@ void destroy(WaylandThread::WindowState &p_window) {
 	}
 }
 void set_mode(WaylandThread::WindowState &p_window, DisplayServerEnums::WindowMode p_mode) {
+	// The Aurora legacy mobile shell owns the available window area. A desktop
+	// windowed request (notably Project Manager) must not undo maximization.
+	if (p_mode == DisplayServerEnums::WINDOW_MODE_WINDOWED) {
+		p_mode = DisplayServerEnums::WINDOW_MODE_MAXIMIZED;
+	}
 	switch (p_mode) {
 		case DisplayServerEnums::WINDOW_MODE_FULLSCREEN:
 		case DisplayServerEnums::WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
@@ -140,5 +145,9 @@ void set_mode(WaylandThread::WindowState &p_window, DisplayServerEnums::WindowMo
 			return;
 	}
 	p_window.mode = p_mode;
+	// wl_shell configure has no state array, unlike xdg_toplevel. Maintain these
+	// flags here so late client size requests cannot override the configured area.
+	p_window.maximized = p_mode == DisplayServerEnums::WINDOW_MODE_MAXIMIZED;
+	p_window.fullscreen = p_mode == DisplayServerEnums::WINDOW_MODE_FULLSCREEN || p_mode == DisplayServerEnums::WINDOW_MODE_EXCLUSIVE_FULLSCREEN;
 }
 } //namespace AuroraLegacyShell

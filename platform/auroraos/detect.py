@@ -83,7 +83,7 @@ def configure(env):
     if env["wayland"]:
         pkg_config("wayland-client", "wayland-cursor", "wayland-egl", "xkbcommon")
         env.Append(CPPDEFINES=["WAYLAND_ENABLED", "XKB_ENABLED"])
-        # Reuse upstream sources until the common Wayland layer is extracted.
+        # Reuse upstream sources without extracting a shared Wayland layer.
         env.Append(CPPPATH=["#platform/linuxbsd"])
         env.Append(LIBS=["rt"])
     if env["pulseaudio"]:

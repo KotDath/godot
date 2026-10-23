@@ -1292,6 +1292,18 @@ void DisplayServerWayland::window_set_size(const Size2i p_size, DisplayServerEnu
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	WindowData &wd = windows[p_window_id];
 
+#ifdef AURORAOS_ENABLED
+	auto *ws = wayland_thread.window_get_state(p_window_id);
+	if (wd.created && ws && ws->legacy_shell_surface && (ws->maximized || ws->fullscreen)) {
+		// The mobile shell owns the size. A rejected client resize must still
+		// restore Window's logical size, even without a new configure event.
+		if (wd.rect_changed_callback.is_valid()) {
+			wd.rect_changed_callback.call(wd.rect);
+		}
+		return;
+	}
+#endif
+
 	if (wd.rect.size == p_size) {
 		return;
 	}

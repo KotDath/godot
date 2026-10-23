@@ -27,6 +27,12 @@ if it is not on PATH. `--dry-run` prints the exact command.
 
 The runner uses sfdk to enter the SDK and SB2 to select the target without
 mutating global sfdk settings. It does not yet integrate `sfdk build` recipes.
+Linux and Aurora use different generated Wayland protocols, module lists and
+editor registration/documentation outputs. The SDK runner temporarily regenerates
+these configuration-dependent sources and restores the host variants even after
+a failed build. Run builds sequentially in a checkout; use
+separate worktrees for concurrent host and target builds.
+
 `--environment psdk` expects an already-entered PSDK; `direct` expects explicit
 cross-toolchain options. These two paths have not been build-tested.
 
