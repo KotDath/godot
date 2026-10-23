@@ -3,6 +3,21 @@
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
+## Deferred documentation work after editor shutdown
+
+Added lifetime checks before loading/regenerating script documentation: queued
+callbacks cannot restart workers after the document, EditorNode or filesystem
+owner has been destroyed. The targeted negative control crashed with SIGSEGV
+before the guard. The final regression passes 3 assertions and invokes both
+methods directly and through the deferred message queue without editor owners.
+The test avoids initializing EditorPaths/Settings or creating source-tree files.
+
+Linux builds; three cold imports plus three warm editor starts exit cleanly, and
+the 7-case / 101-assertion Aurora IME regression still passes. Both ARM editor
+builds pass with source-host provenance. This fixes the demonstrated teardown
+callback failure. The earlier intermittent full import/quit abort was not reproduced
+in three additional cold pre-fix runs; no upstream runtime attribution is made.
+
 ## Source-host build version metadata (point 13, first part)
 
 Reproduced a provenance mismatch: the host was at `753bc0cdc7`, while an SDK query
@@ -130,11 +145,11 @@ prediction/range correction, and candidate placement across rotation remain open
 The later fourth part above adds completion/correction policy and records a
 controlled native composition test. Real language acceptance remains separate.
 
-One `--headless --editor --import --quit` run aborted during shutdown after reporting
-an absent EditorNode singleton from script-doc cache loading. Starting the same
-project with `--headless --editor --quit-after 120` completed normally. The immediate
-import/quit failure remains an open reproducibility/lifecycle investigation; it is
-not counted as a successful import check or attributed to upstream without comparison.
+One earlier `--headless --editor --import --quit` run aborted during shutdown after
+reporting an absent EditorNode singleton from script-doc cache loading. Starting
+the same project with `--headless --editor --quit-after 120` completed normally.
+The later teardown checks above reproduce and fix a late-callback failure and
+record subsequent clean import/start runs; the old failed run remains a failure.
 
 ## IME context and range edits (point 4, second part)
 

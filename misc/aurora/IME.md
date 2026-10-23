@@ -60,6 +60,14 @@ callback is focus-scoped and idempotent: a delayed old client cannot close a new
 client's IME. External context changes still reset/drop stale requests. Negative or invalid byte
 cursor positions hide the caret; an omitted cursor means the end of preedit.
 
+Selection policy needs separate acceptance from composition display. Existing
+controls remove selected committed text when non-empty preedit begins; cancelling
+preedit does not automatically restore that text. This is consistent with the
+selection-removal step in [Qt's input-method event contract](https://doc.qt.io/archives/qt-5.15/qinputmethodevent.html#details).
+Do not infer a cancel-restores-selection requirement from the word “preedit”.
+Undo grouping across selection removal and later commits still needs its own
+control/device checks; atomic commit replacement is already tested separately.
+
 Style ranges are converted only at UTF-8 boundaries. Controls render default and
 underline spans, emphasize active/selected spans, dim inactive spans, tint selected
 spans and mark incorrect spans in red. `none` leaves the range undecorated. The
