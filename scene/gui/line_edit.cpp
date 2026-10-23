@@ -130,12 +130,36 @@ void LineEdit::_close_ime_window() {
 	DisplayServer::get_singleton()->window_set_ime_active(false, wid);
 }
 
+void LineEdit::_ime_commit_text(const String &p_text) {
+	if (!has_focus() || !window_has_focus || !editable || !editing) {
+		return;
+	}
+	const String committed = p_text.strip_escapes();
+	if (committed.is_empty()) {
+		return;
+	}
+	const String previous = text;
+	// Replace the selection and insert as one undo operation, including equal-length replacements.
+	if (selection.enabled) {
+		const int start = selection.begin;
+		text = text.left(start) + text.substr(selection.end);
+		deselect();
+		_shape();
+		set_caret_column(start);
+	}
+	insert_text_at_caret(committed);
+	if (text != previous) {
+		_text_changed();
+	}
+}
+
 void LineEdit::_update_ime_window_position() {
 	DisplayServerEnums::WindowID wid = get_window() ? get_window()->get_window_id() : DisplayServerEnums::INVALID_WINDOW_ID;
 	if (wid == DisplayServerEnums::INVALID_WINDOW_ID || !DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_IME)) {
 		return;
 	}
 	DisplayServer::get_singleton()->window_set_ime_active(true, wid);
+	DisplayServer::get_singleton()->window_set_ime_commit_callback(callable_mp(this, &LineEdit::_ime_commit_text), wid);
 	Point2 pos = Point2(get_caret_pixel_pos().x, (get_size().y + theme_cache.font->get_height(theme_cache.font_size)) / 2) + get_global_position();
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();

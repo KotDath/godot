@@ -3,6 +3,35 @@
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
+
+## Atomic IME commits (point 4, first part)
+
+Aurora text-input-v2 now queues whole strings to the focused text control on the
+main thread. CodeEdit/TextEdit preserve multiline text and tabs and group a
+selection replacement into one undo operation. LineEdit strips escape characters,
+respects its length limit, and emits changes for equal-length replacements.
+Queued commits retain their recipient and focus generation; unsupported backends
+continue their existing key-event path. Empty commits only clear composition.
+
+KVADRA ARM64 test editor RPM `ru.kotdath.godoteditor` 4.7.2-8 passed 13 ordered
+native Maliit checkpoints: Unicode insertion, multiline/tab preservation,
+selection replacement, one-step undo, same-length LineEdit replacement, escape
+filtering, native key/backspace, and switching to read-only. The pre-change RPM
+reproduced loss of newlines/tabs with the same input. Emoji codepoints survive
+exactly; the fixture's default font lacks some emoji glyphs. This is a standalone
+fixture run from the installed editor binary; it is not a new sandbox claim.
+
+ARM64 and ARM32 editor builds pass with this change.
+`misc/aurora/ime_smoke` contains the fixture and log verifier. Full surrounding-text
+synchronization, prediction/replacement ranges and composition/reset coverage are
+still pending. ARM32 hardware and Linux Wayland runtime regression remain pending.
+Aurora APM can retain an old `current` version while the editor is running; stop it
+and launch through RuntimeManager before checking an updated package.
+The SDK currently sees a stale Git worktree ref (`7281b98b6`) outside this source
+worktree, so the embedded Git revision is not reliable provenance for these local
+builds. The test identifies the exact RPM release and `/proc/PID/exe`; SDK Git
+metadata synchronization remains a build reproducibility follow-up.
+
 ## Verified
 
 - Pinned Python 3.12.12 and SCons 4.9.1 bootstrapped in SDK tooling, then used

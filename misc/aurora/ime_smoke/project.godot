@@ -1,0 +1,12 @@
+config_version=5
+
+[application]
+config/name="Aurora IME Smoke"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=2000
+window/size/viewport_height=1200
+
+[rendering]
+renderer/rendering_method="gl_compatibility"

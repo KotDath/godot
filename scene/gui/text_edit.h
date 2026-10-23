@@ -334,6 +334,7 @@ private:
 	void _update_caches(bool p_invalidate_all = false);
 
 	void _close_ime_window();
+	void _ime_commit_text(const String &p_text);
 	void _update_ime_window_position();
 	void _update_ime_text();
 

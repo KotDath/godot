@@ -186,6 +186,11 @@ public:
 
 	public:
 		String text;
+#ifdef AURORAOS_ENABLED
+		Callable callback;
+		uint64_t generation = 0;
+		bool atomic = false;
+#endif
 	};
 
 	class ColorProfileMessage : public WindowMessage {
@@ -343,6 +348,8 @@ public:
 
 		struct wl_surface *wl_surface = nullptr;
 #ifdef AURORAOS_ENABLED
+		Callable ime_commit_callback;
+		uint64_t ime_generation = 0;
 		struct qt_extended_surface *qt_extended_surface = nullptr;
 		struct wl_shell_surface *legacy_shell_surface = nullptr;
 #endif

@@ -1463,6 +1463,18 @@ bool DisplayServerWayland::can_any_window_draw() const {
 	return suspend_state == SuspendState::NONE;
 }
 
+#ifdef AURORAOS_ENABLED
+void DisplayServerWayland::window_set_ime_commit_callback(const Callable &p_callback, DisplayServerEnums::WindowID p_window_id) {
+	MutexLock mutex_lock(wayland_thread.mutex);
+	auto *ws = wayland_thread.window_get_state(p_window_id);
+	ERR_FAIL_NULL(ws);
+	if (ws->ime_commit_callback != p_callback) {
+		ws->ime_commit_callback = p_callback;
+		ws->ime_generation++;
+	}
+}
+#endif
+
 void DisplayServerWayland::window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
@@ -2148,6 +2160,25 @@ void DisplayServerWayland::process_events() {
 
 		Ref<WaylandThread::IMECommitEventMessage> ime_commit_msg = msg;
 		if (ime_commit_msg.is_valid()) {
+#ifdef AURORAOS_ENABLED
+			if (ime_commit_msg->atomic) {
+				// Apply preceding pointer/key events before checking the recipient's focus generation.
+				Input::get_singleton()->flush_buffered_events();
+				bool current = false;
+				{
+					MutexLock mutex_lock(wayland_thread.mutex);
+					auto *ws = wayland_thread.window_get_state(ime_commit_msg->id);
+					current = ws && ws->ime_generation == ime_commit_msg->generation;
+				}
+				if (current && ime_commit_msg->callback.is_valid()) {
+					ime_text = String();
+					ime_selection = Vector2i();
+					OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+					ime_commit_msg->callback.call(ime_commit_msg->text);
+				}
+				continue;
+			}
+#endif
 			for (int i = 0; i < ime_commit_msg->text.length(); i++) {
 				const char32_t codepoint = ime_commit_msg->text[i];
 

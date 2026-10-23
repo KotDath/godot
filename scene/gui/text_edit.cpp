@@ -3449,6 +3449,13 @@ void TextEdit::_close_ime_window() {
 	DisplayServer::get_singleton()->window_set_ime_active(false, wid);
 }
 
+void TextEdit::_ime_commit_text(const String &p_text) {
+	if (!has_focus() || !window_has_focus || !editable || p_text.is_empty()) {
+		return;
+	}
+	insert_text_at_caret(p_text);
+}
+
 void TextEdit::_update_ime_window_position() {
 	DisplayServerEnums::WindowID wid = get_window() ? get_window()->get_window_id() : DisplayServerEnums::INVALID_WINDOW_ID;
 	if (wid == DisplayServerEnums::INVALID_WINDOW_ID || !DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_IME)) {
@@ -3459,6 +3466,7 @@ void TextEdit::_update_ime_window_position() {
 		return;
 	}
 	DisplayServer::get_singleton()->window_set_ime_active(true, wid);
+	DisplayServer::get_singleton()->window_set_ime_commit_callback(callable_mp(this, &TextEdit::_ime_commit_text), wid);
 	Point2 pos = get_global_position() + get_caret_draw_pos();
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();

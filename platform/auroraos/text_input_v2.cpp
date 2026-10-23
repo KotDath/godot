@@ -109,6 +109,12 @@ void commit(void *data, zwp_text_input_v2 *, const char *text) {
 	message.instantiate();
 	message->id = s->window;
 	message->text = String::utf8(text);
+	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
+	if (ws) {
+		message->callback = ws->ime_commit_callback;
+		message->generation = ws->ime_generation;
+		message->atomic = !message->callback.is_null();
+	}
 	s->seat->wayland_thread->push_message(message);
 }
 void cursor_position(void *, zwp_text_input_v2 *, int32_t, int32_t) {}
@@ -200,6 +206,8 @@ bool activate(WaylandThread::SeatState *seat, DisplayServerEnums::WindowID windo
 	if (active) {
 		update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_ENTER);
 	} else {
+		ws->ime_commit_callback = Callable();
+		ws->ime_generation++;
 		zwp_text_input_v2_hide_input_panel(s->input);
 		zwp_text_input_v2_disable(s->input, ws->wl_surface);
 		s->panel_height = 0;

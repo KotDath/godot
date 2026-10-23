@@ -335,6 +335,9 @@ public:
 
 	virtual bool can_any_window_draw() const override;
 
+#ifdef AURORAOS_ENABLED
+	virtual void window_set_ime_commit_callback(const Callable &p_callback, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
+#endif
 	virtual void window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
 	virtual void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
 

@@ -1,0 +1,70 @@
+extends Control
+
+var multiline := CodeEdit.new()
+var single := LineEdit.new()
+var status := Label.new()
+var evidence: FileAccess
+
+func _ready() -> void:
+	evidence = FileAccess.open("user://ime-results.jsonl", FileAccess.WRITE)
+	var title := Label.new()
+	title.text = "Aurora IME: Unicode, multiline, selection, undo"
+	title.position = Vector2(30, 15)
+	title.add_theme_font_size_override("font_size", 32)
+	add_child(title)
+	multiline.position = Vector2(30, 80)
+	multiline.size = Vector2(1850, 290)
+	multiline.add_theme_font_size_override("font_size", 30)
+	add_child(multiline)
+	single.position = Vector2(30, 390)
+	single.size = Vector2(1850, 65)
+	single.add_theme_font_size_override("font_size", 30)
+	add_child(single)
+	var actions := ["Reset", "Select multiline", "Undo multiline", "Select single", "Undo single", "Read only"]
+	for index in actions.size():
+		var button := Button.new()
+		button.text = actions[index]
+		button.position = Vector2(30 + index * 300, 480)
+		button.size = Vector2(285, 65)
+		button.focus_mode = Control.FOCUS_NONE
+		button.pressed.connect(_action.bind(index))
+		add_child(button)
+	status.position = Vector2(30, 570)
+	status.size = Vector2(1850, 60)
+	add_child(status)
+	multiline.text_changed.connect(_record.bind("multiline"))
+	single.text_changed.connect(func(_text: String): _record("single"))
+	_action(0)
+
+func _action(index: int) -> void:
+	match index:
+		0:
+			multiline.editable = true
+			single.editable = true
+			multiline.text = ""
+			single.text = ""
+			multiline.clear_undo_history()
+		1:
+			multiline.grab_focus()
+			multiline.select_all()
+		2:
+			multiline.undo()
+		3:
+			single.grab_focus()
+			single.edit()
+			single.select_all()
+		4:
+			single.menu_option(LineEdit.MENU_UNDO)
+		5:
+			multiline.editable = false
+			single.editable = false
+	_record("action_%d" % index)
+
+func _record(event: String) -> void:
+	var data := {"event": event, "multiline": multiline.text, "single": single.text}
+	var line := JSON.stringify(data)
+	status.text = line
+	print("AURORA_IME ", line)
+	if evidence:
+		evidence.store_line(line)
+		evidence.flush()
