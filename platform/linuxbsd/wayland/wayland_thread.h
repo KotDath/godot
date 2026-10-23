@@ -215,6 +215,13 @@ public:
 		List<struct wl_output *> wl_outputs;
 		List<struct wl_seat *> wl_seats;
 
+#ifdef AURORAOS_ENABLED
+		struct qt_surface_extension *qt_surface_extension = nullptr;
+		uint32_t qt_surface_extension_name = 0;
+		struct wl_shell *legacy_shell = nullptr;
+		uint32_t legacy_shell_name = 0;
+#endif
+
 		// xdg-shell globals.
 
 		struct xdg_wm_base *xdg_wm_base = nullptr;
@@ -331,6 +338,10 @@ public:
 		uint64_t last_frame_time = 0;
 
 		struct wl_surface *wl_surface = nullptr;
+#ifdef AURORAOS_ENABLED
+		struct qt_extended_surface *qt_extended_surface = nullptr;
+		struct wl_shell_surface *legacy_shell_surface = nullptr;
+#endif
 		struct xdg_surface *xdg_surface = nullptr;
 		struct xdg_toplevel *xdg_toplevel = nullptr;
 
@@ -1274,6 +1285,8 @@ public:
 	static void window_state_set_buffer_scale(WindowState *p_ws, int p_buffer_scale);
 
 	static Vector2i scale_vector2i(const Vector2i &p_vector, double p_amount);
+
+	bool supports_xdg_shell() const { return registry.xdg_wm_base != nullptr; }
 
 	void push_message(Ref<Message> message);
 	bool has_message();

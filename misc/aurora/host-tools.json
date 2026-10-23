@@ -1,0 +1,12 @@
+{
+  "python": {
+    "version": "3.12.12",
+    "url": "https://www.python.org/ftp/python/3.12.12/Python-3.12.12.tar.xz",
+    "sha256": "fb85a13414b028c49ba18bbd523c2d055a30b56b18b92ce454ea2c51edc656c4"
+  },
+  "scons": {
+    "version": "4.9.1",
+    "url": "https://files.pythonhosted.org/packages/45/92/50b739021983b131dcacd57aa8b04d31c5acc2e7e0eb4ed4a362f438c6b7/scons-4.9.1-py3-none-any.whl",
+    "sha256": "d2db1a22eb6039e97cbbb0106f18f435af033d0aad190299c9688378e2810a5e"
+  }
+}

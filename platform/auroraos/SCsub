@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+
+sources = ["godot_auroraos.cpp", "os_auroraos.cpp"]
+if env["wayland"]:
+    sources += ["legacy_shell.cpp"]
+    sources += SConscript("#platform/linuxbsd/wayland/SCsub")
+    protocol = "#platform/auroraos/protocol/surface-extension.xml"
+    env.WAYLAND_API_HEADER("protocol/surface_extension.gen.h", protocol)
+    sources += env.WAYLAND_API_CODE("protocol/surface_extension.gen.c", protocol)
+env.add_program("#bin/godot", sources)

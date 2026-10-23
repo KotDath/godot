@@ -37,6 +37,10 @@
 #include "drivers/egl/egl_manager.h"
 
 class EGLManagerWaylandGLES : public EGLManager {
+protected:
+	EGLNativeDisplayType _get_native_display(void *p_display) const override { return (EGLNativeDisplayType)p_display; }
+	EGLNativeWindowType _get_native_window(void *p_window) const override { return (EGLNativeWindowType)p_window; }
+
 public:
 	virtual const char *_get_platform_extension_name() const override;
 	virtual EGLenum _get_platform_extension_enum() const override;

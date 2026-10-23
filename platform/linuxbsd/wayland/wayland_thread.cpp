@@ -29,6 +29,9 @@
 /**************************************************************************/
 
 #include "wayland_thread.h"
+#ifdef AURORAOS_ENABLED
+#include "platform/auroraos/legacy_shell.h"
+#endif
 
 #include "core/config/engine.h"
 #include "core/io/image.h"
@@ -40,7 +43,11 @@
 #include <dev/evdev/input-event-codes.h>
 #else
 // Assume Linux.
+#if __has_include(<linux/input-event-codes.h>)
 #include <linux/input-event-codes.h>
+#else
+#include <linux/input.h>
+#endif
 #endif
 
 // For the actual polling thread.
@@ -326,9 +333,9 @@ void WaylandThread::_seat_state_handle_xkb_keycode(SeatState *p_ss, xkb_keycode_
 	ERR_FAIL_NULL(wayland_thread);
 
 	Key last_key = Key::NONE;
-	xkb_compose_status compose_status = xkb_compose_state_get_status(p_ss->xkb_compose_state);
+	xkb_compose_status compose_status = p_ss->xkb_compose_state ? xkb_compose_state_get_status(p_ss->xkb_compose_state) : XKB_COMPOSE_NOTHING;
 
-	if (p_pressed) {
+	if (p_pressed && p_ss->xkb_compose_state) {
 		xkb_keysym_t keysym = xkb_state_key_get_one_sym(p_ss->xkb_state, p_xkb_keycode);
 		xkb_compose_feed_result compose_result = xkb_compose_state_feed(p_ss->xkb_compose_state, keysym);
 		compose_status = xkb_compose_state_get_status(p_ss->xkb_compose_state);
@@ -541,6 +548,11 @@ void WaylandThread::_wl_registry_on_global(void *data, struct wl_registry *wl_re
 	}
 
 	registry->global_names.insert(name);
+#ifdef AURORAOS_ENABLED
+	if (AuroraLegacyShell::bind(*registry, wl_registry, name, interface)) {
+		return;
+	}
+#endif
 
 	if (strcmp(interface, wl_shm_interface.name) == 0) {
 		registry->wl_shm = (struct wl_shm *)wl_registry_bind(wl_registry, name, &wl_shm_interface, 1);
@@ -819,6 +831,12 @@ void WaylandThread::_wl_registry_on_global_remove(void *data, struct wl_registry
 	if (!registry->global_names.erase(name)) {
 		WARN_PRINT("Received remove event for unknown Wayland global!");
 	}
+
+#ifdef AURORAOS_ENABLED
+	if (AuroraLegacyShell::remove(*registry, name)) {
+		return;
+	}
+#endif
 
 	if (name == registry->wl_shm_name) {
 		if (registry->wl_shm) {
@@ -2408,7 +2426,9 @@ void WaylandThread::_wl_keyboard_on_keymap(void *data, struct wl_keyboard *wl_ke
 	ss->xkb_compose_table = xkb_compose_table_new_from_locale(ss->xkb_context, locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
 
 	xkb_compose_state_unref(ss->xkb_compose_state);
-	ss->xkb_compose_state = xkb_compose_state_new(ss->xkb_compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
+	// Minimal mobile images may have no X11 Compose data. Raw key events
+	// remain usable; composition can also be provided by the compositor IME.
+	ss->xkb_compose_state = ss->xkb_compose_table ? xkb_compose_state_new(ss->xkb_compose_table, XKB_COMPOSE_STATE_NO_FLAGS) : nullptr;
 
 	xkb_state_update_mask(ss->xkb_state, ss->mods_depressed, ss->mods_latched, ss->mods_locked, 0, 0, ss->current_layout_index);
 }
@@ -4379,6 +4399,11 @@ void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, cons
 		ws.wp_color_management_surface = wp_color_manager_v1_get_surface(registry.wp_color_manager, ws.wl_surface);
 	}
 
+#ifdef AURORAOS_ENABLED
+	if (!registry.xdg_wm_base) {
+		AuroraLegacyShell::create(ws);
+	}
+#endif
 	bool decorated = false;
 
 #ifdef LIBDECOR_ENABLED
@@ -4397,7 +4422,7 @@ void WaylandThread::window_create(DisplayServerEnums::WindowID p_window_id, cons
 	}
 #endif
 
-	if (!decorated) {
+	if (!decorated && registry.xdg_wm_base) {
 		// libdecor has failed loading or is disabled, we shall handle xdg_toplevel
 		// creation and decoration ourselves (and by decorating for now I just mean
 		// asking for SSDs and hoping for the best).
@@ -4526,6 +4551,10 @@ void WaylandThread::window_create_popup(DisplayServerEnums::WindowID p_window_id
 void WaylandThread::window_destroy(DisplayServerEnums::WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	WindowState &ws = windows[p_window_id];
+
+#ifdef AURORAOS_ENABLED
+	AuroraLegacyShell::destroy(ws);
+#endif
 
 	if (ws.xdg_popup) {
 		xdg_popup_destroy(ws.xdg_popup);
@@ -4885,6 +4914,13 @@ void WaylandThread::window_try_set_mode(DisplayServerEnums::WindowID p_window_id
 		return;
 	}
 
+#ifdef AURORAOS_ENABLED
+	if (ws.legacy_shell_surface) {
+		AuroraLegacyShell::set_mode(ws, p_window_mode);
+		return;
+	}
+#endif
+
 	// Don't waste time with hidden windows and whatnot. Behave like it worked.
 #ifdef LIBDECOR_ENABLED
 	if ((!ws.wl_surface || !ws.xdg_toplevel) && !ws.libdecor_frame) {
@@ -5044,6 +5080,11 @@ void WaylandThread::window_set_title(DisplayServerEnums::WindowID p_window_id, c
 	}
 #endif // LIBDECOR_ENABLE
 
+#ifdef AURORAOS_ENABLED
+	if (ws.legacy_shell_surface) {
+		wl_shell_surface_set_title(ws.legacy_shell_surface, p_title.utf8().get_data());
+	}
+#endif
 	if (ws.xdg_toplevel) {
 		xdg_toplevel_set_title(ws.xdg_toplevel, p_title.utf8().get_data());
 	}
@@ -5060,6 +5101,11 @@ void WaylandThread::window_set_app_id(DisplayServerEnums::WindowID p_window_id, 
 	}
 #endif // LIBDECOR_ENABLED
 
+#ifdef AURORAOS_ENABLED
+	if (ws.legacy_shell_surface) {
+		wl_shell_surface_set_class(ws.legacy_shell_surface, OS::get_singleton()->get_executable_path().get_file().utf8().get_data());
+	}
+#endif
 	if (ws.xdg_toplevel) {
 		xdg_toplevel_set_app_id(ws.xdg_toplevel, p_app_id.utf8().get_data());
 		return;
@@ -5548,7 +5594,13 @@ Error WaylandThread::init() {
 	String embedder_socket_path;
 
 #ifdef TOOLS_ENABLED
+#ifdef AURORAOS_ENABLED
+	// The embedding proxy currently forwards XDG shell only. Aurora's legacy
+	// shell cannot pass through it; editor games use a separate window.
+	bool embedder_enabled = false;
+#else
 	bool embedder_enabled = true;
+#endif
 
 	if (OS::get_singleton()->get_environment("GODOT_WAYLAND_DISABLE_EMBEDDER") == "1") {
 		print_verbose("Disabling Wayland embedder as per GODOT_WAYLAND_DISABLE_EMBEDDER.");
@@ -5626,7 +5678,11 @@ Error WaylandThread::init() {
 
 	ERR_FAIL_NULL_V_MSG(registry.wl_shm, ERR_UNAVAILABLE, "Can't obtain the Wayland shared memory global.");
 	ERR_FAIL_NULL_V_MSG(registry.wl_compositor, ERR_UNAVAILABLE, "Can't obtain the Wayland compositor global.");
+#ifdef AURORAOS_ENABLED
+	ERR_FAIL_COND_V_MSG(!registry.xdg_wm_base && !registry.legacy_shell, ERR_UNAVAILABLE, "Neither XDG shell nor wl_shell is available.");
+#else
 	ERR_FAIL_NULL_V_MSG(registry.xdg_wm_base, ERR_UNAVAILABLE, "Can't obtain the Wayland XDG shell global.");
+#endif
 
 	// Embedded games can't access the decoration and icon protocol.
 	if (!Engine::get_singleton()->is_embedded_in_editor()) {
@@ -6299,8 +6355,8 @@ void WaylandThread::destroy() {
 			window_ids.push_back(pair.key);
 		}
 
-		for (LocalVector<DisplayServerEnums::WindowID>::Iterator E = window_ids.end(); E != window_ids.begin(); --E) {
-			window_destroy(*E);
+		for (int64_t i = int64_t(window_ids.size()) - 1; i >= 0; --i) {
+			window_destroy(window_ids[i]);
 		}
 	}
 

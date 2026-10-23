@@ -301,11 +301,20 @@ bool DisplayServerWayland::has_feature(DisplayServerEnums::Feature p_feature) co
 		case DisplayServerEnums::FEATURE_IME:
 		case DisplayServerEnums::FEATURE_WINDOW_DRAG:
 		case DisplayServerEnums::FEATURE_CLIPBOARD_PRIMARY:
-		case DisplayServerEnums::FEATURE_SUBWINDOWS:
-		case DisplayServerEnums::FEATURE_WINDOW_EMBEDDING:
 		case DisplayServerEnums::FEATURE_SELF_FITTING_WINDOWS:
 		case DisplayServerEnums::FEATURE_HDR_OUTPUT: {
 			return true;
+		} break;
+
+		case DisplayServerEnums::FEATURE_WINDOW_EMBEDDING: {
+#ifdef AURORAOS_ENABLED
+			return false;
+#else
+			return true;
+#endif
+		} break;
+		case DisplayServerEnums::FEATURE_SUBWINDOWS: {
+			return wayland_thread.supports_xdg_shell();
 		} break;
 
 		//case DisplayServerEnums::FEATURE_NATIVE_DIALOG:

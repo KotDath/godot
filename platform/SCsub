@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from misc.utility.scons_hints import *
 
+import os
 from glob import glob
 
 import platform_builders
@@ -12,6 +13,8 @@ env.platform_sources = []
 
 # Generate export icons
 for platform in env.platform_exporters:
+    if env.editor_build and os.path.exists(f"{platform}/export/SCsub"):
+        SConscript(f"{platform}/export/SCsub")
     for path in glob(f"{platform}/export/*.svg"):
         env.CommandNoCache(path.replace(".svg", "_svg.gen.h"), path, env.Run(platform_builders.export_icon_builder))
 

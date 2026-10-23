@@ -74,6 +74,12 @@ private:
 	// On EGL the default swap interval is 1 and thus vsync is on by default.
 	bool use_vsync = true;
 
+protected:
+	// Native handle representation differs between window systems. X11 passes
+	// addresses of handles; Wayland passes the objects themselves.
+	virtual EGLNativeDisplayType _get_native_display(void *p_display) const { return *static_cast<EGLNativeDisplayType *>(p_display); }
+	virtual EGLNativeWindowType _get_native_window(void *p_window) const { return *static_cast<EGLNativeWindowType *>(p_window); }
+
 	virtual const char *_get_platform_extension_name() const = 0;
 	virtual EGLenum _get_platform_extension_enum() const = 0;
 	virtual EGLenum _get_platform_api_enum() const = 0;

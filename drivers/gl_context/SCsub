@@ -3,7 +3,7 @@ from misc.utility.scons_hints import *
 
 Import("env")
 
-if env["platform"] in ["macos", "windows", "linuxbsd"]:
+if env["platform"] in ["macos", "windows", "linuxbsd", "auroraos"]:
     # Thirdparty source files
     thirdparty_dir = "#thirdparty/glad/"
     thirdparty_sources = ["gl.c"]
@@ -11,7 +11,7 @@ if env["platform"] in ["macos", "windows", "linuxbsd"]:
     env.Prepend(CPPPATH=[thirdparty_dir])
 
     env.Append(CPPDEFINES=["GLAD_ENABLED"])
-    if env["platform"] == "linuxbsd":
+    if env["platform"] in ["linuxbsd", "auroraos"]:
         thirdparty_sources += ["egl.c"]
         env.Append(CPPDEFINES=["EGL_ENABLED", "GLAD_GLES2"])
     else:

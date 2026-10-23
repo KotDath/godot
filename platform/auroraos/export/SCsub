@@ -1,0 +1,19 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import json
+from pathlib import Path
+
+Import("env")
+
+
+def embed_resources(target, source, env):
+    names = ("aurora_package_script", "aurora_engine_license", "aurora_engine_copyright")
+    with open(str(target[0]), "w", encoding="utf-8") as stream:
+        stream.write("// Generated; do not edit.\n#pragma once\n")
+        for name, node in zip(names, source):
+            content = Path(str(node)).read_text(encoding="utf-8")
+            stream.write("static const char " + name + "[] = " + json.dumps(content) + ";\n")
+
+
+env.Command("resources.gen.h", ["#misc/aurora/package.py", "#LICENSE.txt", "#COPYRIGHT.txt"], embed_resources)

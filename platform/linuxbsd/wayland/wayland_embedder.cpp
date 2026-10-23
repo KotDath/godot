@@ -40,7 +40,11 @@
 #include <dev/evdev/input-event-codes.h>
 #else
 // Assume Linux.
+#if __has_include(<linux/input-event-codes.h>)
 #include <linux/input-event-codes.h>
+#else
+#include <linux/input.h>
+#endif
 #endif
 
 #include "core/os/os.h"
