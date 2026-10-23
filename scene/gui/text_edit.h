@@ -305,6 +305,7 @@ private:
 
 	// Text properties.
 	String ime_text = "";
+	Dictionary ime_metadata;
 	Point2 ime_selection;
 
 	// Placeholder

@@ -30,7 +30,9 @@
 
 #pragma once
 
+#include "core/variant/array.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 
 // Protocol conversion is isolated here; text controls only see Unicode character offsets.
 namespace AuroraIME {
@@ -56,6 +58,41 @@ inline int character_at_byte(const String &p_text, int64_t p_byte) {
 
 inline int bytes_at_character(const String &p_text, int p_character) {
 	return p_text.substr(0, p_character).utf8().length();
+}
+
+struct PreeditStyle {
+	uint32_t index;
+	uint32_t length;
+	uint32_t style;
+};
+
+inline Dictionary preedit_metadata(const String &p_text, const String &p_commit, int p_cursor, const Vector<PreeditStyle> &p_styles, Vector2i &r_selection) {
+	Dictionary result;
+	result["commit_text"] = p_commit; // An empty fallback is meaningful: cancel on reset.
+	const int cursor = p_cursor == INT32_MAX ? p_text.length() : character_at_byte(p_text, p_cursor);
+	result["caret_visible"] = cursor >= 0;
+	r_selection = Vector2i(MAX(0, cursor), 0);
+	static const char *names[] = { "default", "none", "active", "inactive", "highlight", "underline", "selection", "incorrect" };
+	Array styles;
+	for (const PreeditStyle &style : p_styles) {
+		if (style.style >= 8) {
+			continue;
+		}
+		const int from = character_at_byte(p_text, style.index);
+		const int to = character_at_byte(p_text, int64_t(style.index) + style.length);
+		if (from < 0 || to <= from) {
+			continue;
+		}
+		Dictionary span;
+		span["range"] = Vector2i(from, to);
+		span["style"] = StringName(names[style.style]);
+		styles.push_back(span);
+		if (style.style == 4 || style.style == 6) {
+			r_selection = Vector2i(from, to - from);
+		}
+	}
+	result["styles"] = styles;
+	return result;
 }
 
 inline bool operation(const Dictionary &p_context, const String &p_commit, uint32_t p_before, uint32_t p_after, bool p_move, int32_t p_cursor, int32_t p_anchor, Dictionary &r_operation) {

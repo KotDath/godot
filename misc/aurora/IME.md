@@ -46,14 +46,37 @@ by the protocol. Queued commit and preedit messages retain their window and focu
 generation. Leaving the surface invalidates old messages. Reset callbacks are
 destroyed when the seat disappears.
 
-Deletes preceding preedit are queued before the preedit update. The adapter uses
-the end of preedit as the default cursor and converts highlight/selection ranges
-from UTF-8 bytes. Godot currently represents a single preedit selection range.
+Deletes preceding preedit are queued before the preedit update. Preedit carries
+internal metadata alongside its display string: `commit_text`, `caret_visible`,
+and `styles` (half-open Unicode ranges and named decorations). The fallback may
+be different from the displayed composition, or empty. Each control retains its
+own metadata until apply/cancel, so switching native clients cannot commit another
+field's text. A metadata-only update also notifies the focused control. Backends
+without metadata preserve their original apply behavior. Negative or invalid byte
+cursor positions hide the caret; an omitted cursor means the end of preedit.
 
-Remaining work in roadmap point 4: commit fallback supplied by preedit, hidden
-preedit caret and richer styling, continuous cursor rectangle/candidate placement,
-editor layout above the keyboard, and device coverage with a composing input
-method. These are not covered by plain Russian/English commit tests.
+Style ranges are converted only at UTF-8 boundaries. Controls render default and
+underline spans, emphasize active/selected spans, dim inactive spans, tint selected
+spans and mark incorrect spans in red. `none` leaves the range undecorated. The
+text shaper supplies bidirectional/wrapped selection geometry. These decorations
+do not switch fonts or synthesize a wavy error underline. Native styling is bounded
+to 1024 spans; unusually large preedit strings retain the existing basic renderer.
+
+LineEdit/TextEdit already refresh IME placement while drawing. They now supply the
+actual caret rectangle through an optional internal DisplayServer method; other
+backends retain their existing point API. Aurora transforms all four rectangle
+corners before converting to surface units. Unchanged rectangles do not generate
+extra protocol requests. Keyboard overlap also retains both dimensions: on the
+portrait-native KVADRA a landscape keyboard arrives as a 520×2000 surface area and
+becomes a 2000×520 overlap in Godot coordinates. Taking the untransformed height
+would incorrectly reserve almost the entire editor. ScriptEditor uses the rotated
+height and viewport scale to place its code viewport above the keyboard. Hiding
+the keyboard targets the active text-input window rather than assuming window 0.
+
+Remaining work in roadmap point 4 includes device acceptance of composition and
+prediction, dialog avoidance, and candidate placement through orientation changes.
+Pure conversion/control tests do not establish that a composing input method has
+been exercised on the device.
 
 ## Validation
 

@@ -1510,21 +1510,23 @@ void ScriptEditor::_notification(int p_what) {
 			list_split->connect("dragged", callable_mp(this, &ScriptEditor::_split_dragged));
 
 			EditorFileSystem::get_singleton()->connect("filesystem_changed", callable_mp(this, &ScriptEditor::_filesystem_changed));
-#ifdef ANDROID_ENABLED
+#if defined(ANDROID_ENABLED) || defined(AURORAOS_ENABLED)
 			set_process(true);
 #endif
 		} break;
 
-#ifdef ANDROID_ENABLED
+#if defined(ANDROID_ENABLED) || defined(AURORAOS_ENABLED)
 		case NOTIFICATION_VISIBILITY_CHANGED: {
 			set_process(is_visible_in_tree());
 		} break;
 
 		case NOTIFICATION_PROCESS: {
 			const int kb_height = DisplayServer::get_singleton()->virtual_keyboard_get_height();
+#ifndef AURORAOS_ENABLED
 			if (kb_height == last_kb_height) {
 				break;
 			}
+#endif
 
 			last_kb_height = kb_height;
 			float spacer_height = 0.0f;
@@ -1545,7 +1547,14 @@ void ScriptEditor::_notification(int p_what) {
 
 				const float control_bottom = get_global_position().y + get_size().y;
 				const float extra_bottom = get_viewport_rect().size.y - control_bottom;
+#ifdef AURORAOS_ENABLED
+				// text-input-v2 reports surface coordinates; DisplayServer returns
+				// the rotated overlap in physical pixels. The editor uses viewport units.
+				const float screen_scale = MAX(0.001f, Math::abs(get_window()->get_screen_transform().get_scale().y));
+				spacer_height = float(kb_height) / screen_scale - extra_bottom - status_bar_height;
+#else
 				spacer_height = float(kb_height) - extra_bottom - status_bar_height;
+#endif
 
 				if (spacer_height < 0.0f) {
 					spacer_height = 0.0f;
@@ -3832,7 +3841,7 @@ ScriptEditor::ScriptEditor(WindowWrapper *p_wrapper) {
 	script_split->set_v_size_flags(SIZE_EXPAND_FILL);
 	script_split->set_drag_nested_intersections(true);
 
-#ifdef ANDROID_ENABLED
+#if defined(ANDROID_ENABLED) || defined(AURORAOS_ENABLED)
 	virtual_keyboard_spacer = memnew(Control);
 	virtual_keyboard_spacer->set_h_size_flags(SIZE_EXPAND_FILL);
 	main_container->add_child(virtual_keyboard_spacer);

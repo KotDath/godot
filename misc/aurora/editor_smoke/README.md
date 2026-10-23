@@ -41,5 +41,5 @@ into a noexec project directory is required.
 
 Track developer launches separately from normal application-launcher/sandbox
 runs. This procedure does not establish native compilation, RPM packaging,
-hot reload, or full IME support on the device. In particular, multiline IME
-commits currently lose newline/tab characters; ordinary Enter key input works.
+hot reload, or full IME support on the device. Multiline IME commits and atomic undo are covered separately by
+`misc/aurora/ime_smoke`; composing input and keyboard layout need their own checks.

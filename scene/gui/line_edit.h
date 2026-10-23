@@ -118,6 +118,7 @@ private:
 	String placeholder_translated;
 	String secret_character = U"•";
 	String ime_text;
+	Dictionary ime_metadata;
 	Point2 ime_selection;
 
 	RID text_rid;

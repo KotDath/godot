@@ -160,6 +160,9 @@ class DisplayServerWayland : public DisplayServer {
 
 	String ime_text;
 	Vector2i ime_selection;
+#ifdef AURORAOS_ENABLED
+	Dictionary ime_metadata;
+#endif
 
 	SuspendState suspend_state = SuspendState::NONE;
 
@@ -338,6 +341,8 @@ public:
 
 #ifdef AURORAOS_ENABLED
 	virtual void window_set_ime_callbacks(const Callable &p_commit, const Callable &p_context, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
+	virtual Dictionary ime_get_preedit_metadata() const override { return ime_metadata; }
+	virtual bool window_set_ime_rect(const Rect2 &p_rect, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
 #endif
 	virtual void window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;
 	virtual void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id = DisplayServerEnums::MAIN_WINDOW_ID) override;

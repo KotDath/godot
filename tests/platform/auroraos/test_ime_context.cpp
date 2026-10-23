@@ -31,6 +31,7 @@
 #include "tests/test_macros.h"
 
 #include "platform/auroraos/ime_context.h"
+#include "platform/auroraos/orientation.h"
 
 TEST_FORCE_LINK(test_ime_context)
 
@@ -42,6 +43,34 @@ TEST_FORCE_LINK(test_ime_context)
 #endif
 
 namespace TestAuroraIME {
+TEST_CASE("[AuroraIME] Preedit metadata and rotated rectangles") {
+	Vector<AuroraIME::PreeditStyle> styles;
+	styles.push_back({ 2, 4, 6 }); // The emoji, not its four individual bytes.
+	styles.push_back({ 3, 1, 7 }); // Invalid UTF-8 boundaries must not decorate another character.
+	styles.push_back({ UINT32_MAX, UINT32_MAX, 5 });
+	Vector2i selection;
+	const Dictionary metadata = AuroraIME::preedit_metadata(U"А😀Б", U"итог", -1, styles, selection);
+	CHECK(String(metadata["commit_text"]) == String(U"итог"));
+	CHECK_FALSE(bool(metadata["caret_visible"]));
+	CHECK(selection == Vector2i(1, 1));
+	const Array converted = metadata["styles"];
+	REQUIRE(converted.size() == 1);
+	CHECK(Vector2i(Dictionary(converted[0])["range"]) == Vector2i(1, 2));
+	CHECK(StringName(Dictionary(converted[0])["style"]) == StringName("selection"));
+	CHECK(bool(AuroraIME::preedit_metadata(U"А😀Б", "", INT32_MAX, {}, selection)["caret_visible"]));
+	CHECK(selection == Vector2i(3, 0));
+	CHECK_FALSE(bool(AuroraIME::preedit_metadata(U"А😀Б", "", 3, {}, selection)["caret_visible"]));
+	const Rect2 native_panel(0, 0, 520, 2000);
+	CHECK(AuroraOrientation::transform_rect(native_panel, Size2(1200, 2000), 3) == Rect2(0, 680, 2000, 520));
+	const Rect2 caret(200, 180, 1, 40);
+	for (int transform = 0; transform < 4; transform++) {
+		const Size2 native_size(1200, 2000);
+		const Size2 oriented_size = transform % 2 ? Size2(2000, 1200) : native_size;
+		const Rect2 surface = AuroraOrientation::transform_rect(caret, oriented_size, (4 - transform) % 4);
+		CHECK(AuroraOrientation::transform_rect(surface, native_size, transform) == caret);
+	}
+}
+
 TEST_CASE("[AuroraIME] UTF-8 boundaries and replacement ranges") {
 	const String text = U"А😀Б";
 	CHECK(AuroraIME::character_at_byte(text, 0) == 0);
@@ -79,6 +108,62 @@ struct IMEScope {
 		display->commit_ime(operation);
 	}
 };
+
+TEST_CASE("[SceneTree][AuroraIME] Preedit fallback belongs to its text client") {
+	IMEScope ime;
+	LineEdit *line = memnew(LineEdit);
+	TextEdit *edit = memnew(TextEdit);
+	SceneTree::get_singleton()->get_root()->add_child(line);
+	SceneTree::get_singleton()->get_root()->add_child(edit);
+	line->grab_focus();
+	line->edit();
+	Dictionary metadata;
+	metadata["commit_text"] = U"\tготово 😀\n";
+	metadata["caret_visible"] = false;
+	ime.display->set_ime_preedit(U"композиция", Vector2i(), metadata);
+	line->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	CHECK(line->has_ime_text());
+	CHECK(line->get_text().is_empty());
+	// A different client/backend update must not overwrite the cached fallback.
+	ime.display->set_ime_preedit("unrelated", Vector2i(), Dictionary());
+	line->apply_ime();
+	CHECK(line->get_text() == String(U"готово 😀"));
+	CHECK_FALSE(line->has_ime_text());
+	line->undo();
+	CHECK(line->get_text().is_empty());
+	line->edit();
+	metadata["commit_text"] = "";
+	ime.display->set_ime_preedit(U"отмена", Vector2i(), metadata);
+	line->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	line->apply_ime();
+	CHECK(line->get_text().is_empty());
+	line->edit();
+	ime.display->set_ime_preedit("legacy", Vector2i(), Dictionary());
+	line->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	line->apply_ime();
+	CHECK(line->get_text() == "legacy");
+
+	edit->grab_focus();
+	metadata["commit_text"] = U"первая\n\t😀";
+	ime.display->set_ime_preedit("preedit", Vector2i(), metadata);
+	edit->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	CHECK(edit->has_ime_text());
+	// Same display text with a changed fallback must also notify the client.
+	metadata["commit_text"] = U"вторая\n\t😀";
+	ime.display->set_ime_preedit("preedit", Vector2i(), metadata);
+	edit->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	edit->apply_ime();
+	CHECK(edit->get_text() == String(U"вторая\n\t😀"));
+	edit->undo();
+	CHECK(edit->get_text().is_empty());
+	ime.display->set_ime_preedit("discard", Vector2i(), metadata);
+	edit->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
+	edit->cancel_ime();
+	edit->apply_ime();
+	CHECK(edit->get_text().is_empty());
+	memdelete(line);
+	memdelete(edit);
+}
 
 TEST_CASE("[SceneTree][AuroraIME] LineEdit context and atomic edits") {
 	IMEScope ime;

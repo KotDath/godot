@@ -200,7 +200,7 @@ class ScriptEditor : public PanelContainer {
 
 	WindowWrapper *window_wrapper = nullptr;
 
-#ifdef ANDROID_ENABLED
+#if defined(ANDROID_ENABLED) || defined(AURORAOS_ENABLED)
 	Control *virtual_keyboard_spacer = nullptr;
 	int last_kb_height = -1;
 #endif

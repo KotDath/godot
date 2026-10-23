@@ -4,6 +4,25 @@ var multiline := CodeEdit.new()
 var single := LineEdit.new()
 var status := Label.new()
 var evidence: FileAccess
+var last_geometry := Vector3i(-1, -1, -1)
+var last_preedit := ""
+var last_preedit_selection := Vector2i(-1, -1)
+
+func _process(_delta: float) -> void:
+	if not DisplayServer.has_feature(DisplayServer.FEATURE_IME):
+		return
+	var window_size := DisplayServer.window_get_size()
+	var height := DisplayServer.virtual_keyboard_get_height() if DisplayServer.has_feature(DisplayServer.FEATURE_VIRTUAL_KEYBOARD) else 0
+	var geometry := Vector3i(window_size.x, window_size.y, height)
+	if geometry != last_geometry:
+		last_geometry = geometry
+		print("AURORA_IME_GEOMETRY ", JSON.stringify({"width": window_size.x, "height": window_size.y, "keyboard_height": height}))
+	var preedit := DisplayServer.ime_get_text()
+	var selection := DisplayServer.ime_get_selection()
+	if preedit != last_preedit or selection != last_preedit_selection:
+		last_preedit = preedit
+		last_preedit_selection = selection
+		print("AURORA_IME_PREEDIT ", JSON.stringify({"text": preedit, "cursor": selection.x, "selection_length": selection.y}))
 
 func _ready() -> void:
 	evidence = FileAccess.open("user://ime-results.jsonl", FileAccess.WRITE)

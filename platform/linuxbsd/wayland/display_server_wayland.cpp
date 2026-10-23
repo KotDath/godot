@@ -2200,6 +2200,7 @@ void DisplayServerWayland::process_events() {
 					}
 					ime_text = String();
 					ime_selection = Vector2i();
+					ime_metadata = Dictionary();
 					OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
 					ime_commit_msg->callback.call(ime_commit_msg->operation);
 					_aurora_update_ime_context(true, ime_commit_msg->id);
@@ -2224,6 +2225,9 @@ void DisplayServerWayland::process_events() {
 			}
 			ime_text = String();
 			ime_selection = Vector2i();
+#ifdef AURORAOS_ENABLED
+			ime_metadata = Dictionary();
+#endif
 
 			OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
 			continue;
@@ -2240,9 +2244,16 @@ void DisplayServerWayland::process_events() {
 				}
 			}
 #endif
-			if (ime_text != ime_update_msg->text || ime_selection != ime_update_msg->selection) {
+			bool changed = ime_text != ime_update_msg->text || ime_selection != ime_update_msg->selection;
+#ifdef AURORAOS_ENABLED
+			changed = changed || ime_metadata != ime_update_msg->metadata;
+#endif
+			if (changed) {
 				ime_text = ime_update_msg->text;
 				ime_selection = ime_update_msg->selection;
+#ifdef AURORAOS_ENABLED
+				ime_metadata = ime_update_msg->metadata;
+#endif
 
 				OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_OS_IME_UPDATE);
 #ifdef AURORAOS_ENABLED

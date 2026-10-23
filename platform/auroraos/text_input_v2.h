@@ -29,6 +29,8 @@
 /**************************************************************************/
 
 #pragma once
+#include "ime_context.h"
+
 #include "platform/linuxbsd/wayland/wayland_thread.h"
 
 struct AuroraTextInputState {
@@ -45,8 +47,8 @@ struct AuroraTextInputState {
 	bool move_cursor = false;
 	int32_t commit_cursor = 0;
 	int32_t commit_anchor = 0;
-	Vector2i preedit_highlight = Vector2i(-1, 0);
-	int panel_height = 0;
+	Vector<AuroraIME::PreeditStyle> preedit_styles;
+	Rect2i panel_rect;
 	uint32_t purpose = 0;
 	uint32_t hints = 0;
 };
@@ -57,4 +59,5 @@ void attach(WaylandThread::SeatState *seat);
 void detach(WaylandThread::SeatState *seat);
 bool activate(WaylandThread::SeatState *seat, DisplayServerEnums::WindowID window, bool active);
 bool cursor(WaylandThread::SeatState *seat, const Point2i &position, DisplayServerEnums::WindowID window);
+bool cursor_rect(WaylandThread::SeatState *seat, const Rect2 &rect, DisplayServerEnums::WindowID window);
 } //namespace AuroraTextInput

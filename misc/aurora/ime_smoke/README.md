@@ -48,3 +48,23 @@ the 4000-byte limit, UTF-8 cursor/anchor boundaries, multiline context, and that
 password-mode requests contain no surrounding text or cursor positions. The
 **Reset** button restores editable, non-secret fields. For the original 13-step
 verifier, save the log immediately after Read only, before starting more scenarios.
+
+
+## Composition, prediction and geometry
+
+The fixture logs `AURORA_IME_GEOMETRY` when the window size or keyboard overlap
+changes, and `AURORA_IME_PREEDIT` when native composition changes. In landscape
+on KVADRA the keyboard overlap should be about 520 pixels, not the 2000-pixel
+native surface height. Cursor rectangles in the wire trace must have the font
+height after rotation; they must not remain the old fixed 1×10 rectangles.
+
+Use the native predictive layout to type a word, select a suggestion, move the
+caret into an existing word and replace it. Test selection in both controls,
+switching fields during composition, Backspace, and Undo. A predictive layout can
+use range commits without emitting preedit; record which protocol events actually
+occur. For a composing input method also check its preedit display, hidden caret,
+selection/style ranges and fallback on focus loss. Repeat after scrolling,
+resizing and rotation. Dummy password input must remain absent from surrounding
+text. The C++ cases cover fallback differences, empty fallback/cancellation,
+metadata-only changes, malformed style byte boundaries, and all four rectangle
+transforms independently of installed keyboards.

@@ -4,6 +4,55 @@ Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
 
+## IME composition and keyboard geometry (point 4, third part)
+
+Implemented native preedit fallback metadata retained by each LineEdit/TextEdit,
+including empty fallback, cancellation, metadata-only updates, hidden caret and
+UTF-8-validated style spans. Native LineEdit fallback now emits its text change and
+creates an undo state; the new test initially exposed the missing Undo. Other
+backends keep their previous fallback behavior. Decorations use shaped Unicode
+ranges; active/selected, inactive, none and incorrect spans have distinct display.
+They do not synthesize bold/italic fonts or a wavy underline.
+
+Caret rectangles now carry font height, rotate all corners and respect surface
+scale. Unchanged rectangles no longer spam protocol updates. The adapter preserves
+both keyboard overlap dimensions before rotation: the KVADRA trace's 520×2000
+surface overlap becomes a 2000×520 buffer overlap. ScriptEditor uses the resulting
+height in viewport units. Keyboard hide targets the active native text window.
+Architecture and limits: `misc/aurora/IME.md`.
+
+Validation so far: 5 Aurora IME cases / 72 C++ assertions pass; TextEdit regression
+passes 14 cases / 4235 assertions. The fixture script runs headless without errors.
+The Linux editor renders the 3D extension fixture through the host KDE Wayland
+compositor on AMD Radeon 8060S and returns 42 from its native dependency chain.
+This is a basic Wayland runtime regression, not interactive Linux IME acceptance.
+ARM64 and ARM32 editor builds and editor RPMs 4.7.2-11 pass Regular validation
+with the existing non-Silica warning. Both packages were signed using public SDK
+test credentials (no root-CA trust verification). ARM64 was installed through APM;
+ARM32 device execution remains excluded from the current goal. `/proc/15326/exe` confirmed that exact
+release. The native fixture reported a 2000×1200 window and 520-pixel keyboard
+height, a rotated 43×1 caret rectangle, native `helo` key entry, acknowledged
+Cyrillic/emoji replacement, and Undo. The trace is retained locally at
+`.aurora-tools/ime-evidence/ime-preedit11.log.gz`.
+
+The normal sandbox editor (`/proc/16383/exe`, release 11) opened the persisted
+script project. Its code viewport ended above the keyboard and returned to its
+previous height after focus moved to the scene tree. Local screenshots are in
+`.aurora-tools/ime-evidence/editor11-*.png`. This does not establish avoidance for
+all dialogs. The installed predictive keyboard produced empty preedit events
+but no visible suggestions in this configuration; non-empty composition,
+prediction/range correction, and candidate placement across rotation remain open.
+The adapter currently advertises no completion/correction hints. Investigate those
+with suitable control privacy/code-input policies. The installed Maliit also ships
+`PreeditTestHandler.qml`, which can support a controlled native composition test;
+using a test handler must be recorded separately from a real language IME.
+
+One `--headless --editor --import --quit` run aborted during shutdown after reporting
+an absent EditorNode singleton from script-doc cache loading. Starting the same
+project with `--headless --editor --quit-after 120` completed normally. The immediate
+import/quit failure remains an open reproducibility/lifecycle investigation; it is
+not counted as a successful import check or attributed to upstream without comparison.
+
 ## IME context and range edits (point 4, second part)
 
 The new internal DisplayServer text-client callbacks supply a bounded committed
@@ -26,8 +75,8 @@ covered by C++ tests; prediction/composing input methods still need hardware cov
 The final package passed Regular validation with the existing non-Silica warning
 and uses SDK public development signing credentials (no root-CA verification).
 
-Preedit fallback/styling/hidden caret, continuous candidate/cursor geometry,
-keyboard avoidance and composing-language hardware coverage remain open.
+Preedit fallback/styling/hidden caret and keyboard geometry continue in the third
+part above. Composing-language acceptance, prediction and dialog avoidance remain open.
 
 ## Atomic IME commits (point 4, first part)
 
@@ -78,7 +127,8 @@ metadata synchronization remains a build reproducibility follow-up.
   3D viewport without environment overrides (test RPM 4.7.2-8). The XDG-only
   embedding proxy is disabled by default for Aurora.
 - Linux X11 graphical smoke test under Xvfb/llvmpipe passes and returns 42 from
-  the host GDExtension. Linux Wayland hardware regression test is still pending.
+  the host GDExtension. Basic Linux Wayland runtime regression now passes as recorded above; interactive
+  Linux IME coverage remains pending.
 - A real export with a mismatched template architecture fails without producing
   an RPM. Eight packaging boundary tests pass. The embedded PCK survives RPM processing
   byte-for-byte. Exported ARM packages contain only the selected target DSOs.

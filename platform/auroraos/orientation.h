@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/rect2.h"
 #include "core/math/vector2.h"
 #include "core/math/vector2i.h"
 #include "servers/display/display_server_enums.h"
@@ -68,6 +69,13 @@ inline Vector2 to_buffer(Vector2 p, Vector2 size, int transform, bool vector = f
 		default:
 			return p;
 	}
+}
+inline Rect2 transform_rect(const Rect2 &p_rect, Vector2 p_size, int p_transform) {
+	Rect2 result(to_buffer(p_rect.position, p_size, p_transform), Vector2());
+	result.expand_to(to_buffer(p_rect.position + Vector2(p_rect.size.x, 0), p_size, p_transform));
+	result.expand_to(to_buffer(p_rect.position + Vector2(0, p_rect.size.y), p_size, p_transform));
+	result.expand_to(to_buffer(p_rect.get_end(), p_size, p_transform));
+	return result;
 }
 inline int select_transform(DisplayServerEnums::ScreenOrientation requested, int device, bool native_landscape, int previous) {
 	using namespace DisplayServerEnums;

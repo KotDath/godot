@@ -43,6 +43,7 @@
 #include "core/os/os.h"
 #include "core/string/alt_codes.h"
 #include "core/string/string_builder.h"
+#include "scene/gui/ime_preedit.h"
 #include "scene/gui/label.h"
 #include "scene/main/window.h"
 #include "scene/theme/theme_db.h"
@@ -1789,7 +1790,7 @@ void TextEdit::_notification(int p_what) {
 						if (!clipped && get_caret_line(c) == line && carets_wrap_index[c] == line_wrap_index) {
 							carets.write[c].draw_pos.y = ofs_y + ldata->get_line_descent(line_wrap_index);
 
-							if (ime_text.is_empty() || ime_selection.y == 0) {
+							if (ime_text.is_empty() || (ime_selection.y == 0 && bool(ime_metadata.get("caret_visible", true)))) {
 								// Normal caret.
 								CaretInfo ts_caret;
 								if (!str.is_empty() || !ime_text.is_empty()) {
@@ -1906,7 +1907,7 @@ void TextEdit::_notification(int p_what) {
 									}
 								}
 							}
-							if (!ime_text.is_empty()) {
+							if (!ime_text.is_empty() && !IMEPreedit::draw(text_ci, rid, get_caret_column(c), ime_text.length(), ime_metadata, Vector2(char_margin, ofs_y), xmargin_beg, xmargin_end, text_height, caret_width, theme_cache.caret_color)) {
 								{
 									// IME Intermediate text range.
 									const Vector<Vector2> sel = TS->shaped_text_get_selection(rid, get_caret_column(c), get_caret_column(c) + ime_text.length());
@@ -1992,7 +1993,8 @@ void TextEdit::_notification(int p_what) {
 			if (has_focus() && editable) {
 				const String &new_ime_text = DisplayServer::get_singleton()->ime_get_text();
 				const Vector2i &new_ime_selection = DisplayServer::get_singleton()->ime_get_selection();
-				if (ime_text == new_ime_text && ime_selection == new_ime_selection) {
+				const Dictionary new_ime_metadata = DisplayServer::get_singleton()->ime_get_preedit_metadata();
+				if (ime_text == new_ime_text && ime_selection == new_ime_selection && ime_metadata == new_ime_metadata) {
 					break;
 				}
 				if (!window_has_focus && !new_ime_text.is_empty()) {
@@ -2002,6 +2004,7 @@ void TextEdit::_notification(int p_what) {
 				bool had_ime_text = has_ime_text();
 				ime_text = new_ime_text;
 				ime_selection = new_ime_selection;
+				ime_metadata = new_ime_metadata;
 
 				if (!had_ime_text && has_ime_text()) {
 					_cancel_drag_and_drop_text();
@@ -2088,6 +2091,7 @@ bool TextEdit::alt_input(const Ref<InputEvent> &p_gui_input) {
 			alt_code = 0;
 			alt_mode = ALT_INPUT_UNICODE;
 			ime_text = "u";
+			ime_metadata = Dictionary();
 			ime_selection = Vector2i(0, -1);
 			_update_ime_text();
 			return true;
@@ -2102,6 +2106,7 @@ bool TextEdit::alt_input(const Ref<InputEvent> &p_gui_input) {
 			alt_code = 0;
 			alt_mode = ALT_INPUT_UNICODE;
 			ime_text = "u";
+			ime_metadata = Dictionary();
 			ime_selection = Vector2i(0, -1);
 			_update_ime_text();
 			return true;
@@ -2116,6 +2121,7 @@ bool TextEdit::alt_input(const Ref<InputEvent> &p_gui_input) {
 			alt_code = (uint32_t)(k->get_keycode() - Key::KP_0);
 			alt_mode = ALT_INPUT_OEM;
 			ime_text = vformat("o%s", String::num_int64(alt_code, 10));
+			ime_metadata = Dictionary();
 			ime_selection = Vector2i(0, -1);
 			_update_ime_text();
 			return true;
@@ -2130,6 +2136,7 @@ bool TextEdit::alt_input(const Ref<InputEvent> &p_gui_input) {
 			alt_mode = ALT_INPUT_WIN;
 			alt_code = 0;
 			ime_text = "w";
+			ime_metadata = Dictionary();
 			ime_selection = Vector2i(0, -1);
 			_update_ime_text();
 			return true;
@@ -2199,6 +2206,7 @@ bool TextEdit::alt_input(const Ref<InputEvent> &p_gui_input) {
 					ime_text = "w";
 				}
 			}
+			ime_metadata = Dictionary();
 			ime_selection = Vector2i(0, -1);
 			_update_ime_text();
 			return true;
@@ -3559,8 +3567,13 @@ void TextEdit::_update_ime_window_position() {
 	if (get_window()->get_embedder()) {
 		pos += get_viewport()->get_popup_base_transform().get_origin();
 	}
+	const Rect2 caret_rect(pos - Point2(0, get_line_height()), Size2(1, get_line_height()));
+	const Transform2D screen_transform = get_window()->get_screen_transform();
+	if (DisplayServer::get_singleton()->window_set_ime_rect(screen_transform.xform(caret_rect), wid)) {
+		return;
+	}
 	// Take into account the window's transform.
-	pos = get_window()->get_screen_transform().xform(pos);
+	pos = screen_transform.xform(pos);
 	// The window will move to the updated position the next time the IME is updated, not immediately.
 	DisplayServer::get_singleton()->window_set_ime_position(pos, wid);
 }
@@ -3797,6 +3810,7 @@ bool TextEdit::has_ime_text() const {
 }
 
 void TextEdit::cancel_ime() {
+	ime_metadata = Dictionary();
 	if (!has_ime_text()) {
 		_close_ime_window();
 		return;
@@ -3822,7 +3836,7 @@ void TextEdit::apply_ime() {
 			handle_unicode_input(alt_code);
 		}
 	} else {
-		String insert_ime_text = ime_text;
+		String insert_ime_text = ime_metadata.get("commit_text", ime_text);
 		cancel_ime();
 		insert_text_at_caret(insert_ime_text);
 	}

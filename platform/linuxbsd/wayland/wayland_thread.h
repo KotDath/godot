@@ -182,6 +182,7 @@ public:
 #ifdef AURORAOS_ENABLED
 		bool scoped = false;
 		uint64_t generation = 0;
+		Dictionary metadata;
 #endif
 	};
 
@@ -1388,7 +1389,9 @@ public:
 	void aurora_cancel_touches();
 	void aurora_set_ime_context(DisplayServerEnums::WindowID p_window, const Dictionary &p_context, bool p_reset);
 	void aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType type);
+	void aurora_hide_keyboard();
 	int aurora_keyboard_height() const;
+	bool aurora_set_ime_rect(const Rect2 &p_rect, DisplayServerEnums::WindowID p_window);
 #endif
 	void window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id);
 	void window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id);

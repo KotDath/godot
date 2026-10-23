@@ -31,6 +31,7 @@
 #include "text_input_v2.h"
 
 #include "ime_context.h"
+#include "orientation.h"
 #include "protocol/text_input_v2.gen.h"
 
 #include "core/input/input_event.h"
@@ -48,7 +49,7 @@ void reset_pending(AuroraTextInputState *s) {
 	s->commit_cursor = 0;
 	s->commit_anchor = 0;
 	s->preedit_cursor = INT32_MAX;
-	s->preedit_highlight = Vector2i(-1, 0);
+	s->preedit_styles.clear();
 }
 void synchronized(void *data, wl_callback *callback, uint32_t) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
@@ -115,7 +116,7 @@ void enter(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *surface
 void leave(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
 	s->serial = serial;
-	s->panel_height = 0;
+	s->panel_rect = Rect2i();
 	s->entered = false;
 	reset_pending(s);
 	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
@@ -124,19 +125,19 @@ void leave(void *data, zwp_text_input_v2 *, uint32_t serial, wl_surface *) {
 	}
 	clear_preedit(s);
 }
-void panel(void *data, zwp_text_input_v2 *, uint32_t state, int32_t, int32_t, int32_t, int32_t height) {
+void panel(void *data, zwp_text_input_v2 *, uint32_t state, int32_t x, int32_t y, int32_t width, int32_t height) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
-	s->panel_height = state ? MAX(0, height) : 0;
+	s->panel_rect = state ? Rect2i(x, y, MAX(0, width), MAX(0, height)) : Rect2i();
 }
 void commit(void *data, zwp_text_input_v2 *, const char *text);
-void preedit(void *data, zwp_text_input_v2 *input, const char *text, const char *) {
+void preedit(void *data, zwp_text_input_v2 *input, const char *text, const char *commit_text) {
 	auto *s = static_cast<AuroraTextInputState *>(data);
 	if (!s->active || !s->entered || s->reset_callback) {
 		reset_pending(s);
 		return;
 	}
 	const int pending_cursor = s->preedit_cursor;
-	const Vector2i pending_highlight = s->preedit_highlight;
+	const Vector<AuroraIME::PreeditStyle> pending_styles = s->preedit_styles;
 	if (s->delete_before || s->delete_after) {
 		s->move_cursor = false;
 		commit(data, input, "");
@@ -145,15 +146,7 @@ void preedit(void *data, zwp_text_input_v2 *input, const char *text, const char 
 	message.instantiate();
 	message->id = s->window;
 	message->text = String::utf8(text);
-	const int cursor = pending_cursor == INT32_MAX ? message->text.length() : AuroraIME::character_at_byte(message->text, pending_cursor);
-	message->selection = Vector2i(MAX(0, cursor), 0);
-	if (pending_highlight.x >= 0) {
-		const int from = AuroraIME::character_at_byte(message->text, pending_highlight.x);
-		const int to = AuroraIME::character_at_byte(message->text, int64_t(pending_highlight.x) + pending_highlight.y);
-		if (from >= 0 && to >= from) {
-			message->selection = Vector2i(from, to - from);
-		}
-	}
+	message->metadata = AuroraIME::preedit_metadata(message->text, String::utf8(commit_text), pending_cursor, pending_styles, message->selection);
 	auto *ws = s->seat->wayland_thread->window_get_state(s->window);
 	message->scoped = true;
 	message->generation = ws ? ws->ime_generation : 0;
@@ -161,8 +154,9 @@ void preedit(void *data, zwp_text_input_v2 *input, const char *text, const char 
 	reset_pending(s);
 }
 void styling(void *data, zwp_text_input_v2 *, uint32_t index, uint32_t length, uint32_t style) {
-	if ((style == ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_HIGHLIGHT || style == ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_SELECTION) && index <= INT32_MAX && length <= INT32_MAX) {
-		static_cast<AuroraTextInputState *>(data)->preedit_highlight = Vector2i(index, length);
+	auto *s = static_cast<AuroraTextInputState *>(data);
+	if (s->preedit_styles.size() < 1024) {
+		s->preedit_styles.push_back({ index, length, style });
 	}
 }
 void preedit_cursor(void *data, zwp_text_input_v2 *, int32_t index) {
@@ -298,19 +292,29 @@ bool activate(WaylandThread::SeatState *seat, DisplayServerEnums::WindowID windo
 		reset_pending(s);
 		zwp_text_input_v2_hide_input_panel(s->input);
 		zwp_text_input_v2_disable(s->input, ws->wl_surface);
-		s->panel_height = 0;
+		s->panel_rect = Rect2i();
 		clear_preedit(s);
 	}
 	return true;
 }
 bool cursor(WaylandThread::SeatState *seat, const Point2i &position, DisplayServerEnums::WindowID window) {
+	return cursor_rect(seat, Rect2(position, Size2(1, 10)), window);
+}
+bool cursor_rect(WaylandThread::SeatState *seat, const Rect2 &rect, DisplayServerEnums::WindowID window) {
 	if (!seat || !seat->aurora_text_input || seat->wp_text_input) {
 		return false;
 	}
 	auto *ws = seat->wayland_thread->window_get_state(window);
 	double scale = ws ? WaylandThread::window_state_get_scale_factor(ws) : 1.0;
-	seat->ime_rect = Rect2i(Vector2(position) / scale, Size2i(1, 10));
-	update(seat->aurora_text_input, ZWP_TEXT_INPUT_V2_UPDATE_STATE_CHANGE);
+	const Point2i from = Vector2(rect.position / scale).floor();
+	const Point2i to = Vector2(rect.get_end() / scale).ceil();
+	Rect2i logical_rect(from, to - from);
+	logical_rect.size.x = MAX(1, logical_rect.size.x);
+	logical_rect.size.y = MAX(1, logical_rect.size.y);
+	if (seat->ime_rect != logical_rect) {
+		seat->ime_rect = logical_rect;
+		update(seat->aurora_text_input, ZWP_TEXT_INPUT_V2_UPDATE_STATE_CHANGE);
+	}
 	return true;
 }
 } //namespace AuroraTextInput
@@ -374,9 +378,43 @@ void WaylandThread::aurora_show_keyboard(DisplayServerEnums::VirtualKeyboardType
 	AuroraTextInput::update(s, ZWP_TEXT_INPUT_V2_UPDATE_STATE_CHANGE);
 	zwp_text_input_v2_show_input_panel(s->input);
 }
+void WaylandThread::aurora_hide_keyboard() {
+	auto *seat = wl_seat_get_seat_state(wl_seat_current);
+	if (seat && seat->aurora_text_input) {
+		AuroraTextInput::activate(seat, seat->aurora_text_input->window, false);
+	}
+}
+
 int WaylandThread::aurora_keyboard_height() const {
 	auto *seat = wl_seat_get_seat_state(wl_seat_current);
-	return seat && seat->aurora_text_input ? seat->aurora_text_input->panel_height : 0;
+	if (!seat || !seat->aurora_text_input) {
+		return 0;
+	}
+	auto *s = seat->aurora_text_input;
+	auto *ws = window_get_state(s->window);
+	if (!ws || !s->active || !s->entered) {
+		return 0;
+	}
+	const double scale = window_state_get_scale_factor(ws);
+	Rect2 rect(Vector2(s->panel_rect.position) * scale, Vector2(s->panel_rect.size) * scale);
+	if (ws->legacy_shell_surface) {
+		rect = AuroraOrientation::transform_rect(rect, Vector2(ws->rect.size) * scale, AuroraOrientation::get_presentation().transform);
+	}
+	return MAX(0, int(Math::ceil(rect.size.y)));
+}
+
+bool WaylandThread::aurora_set_ime_rect(const Rect2 &p_rect, DisplayServerEnums::WindowID p_window) {
+	return AuroraTextInput::cursor_rect(wl_seat_get_seat_state(wl_seat_current), p_rect, p_window);
+}
+
+bool DisplayServerWayland::window_set_ime_rect(const Rect2 &p_rect, DisplayServerEnums::WindowID p_window_id) {
+	MutexLock lock(wayland_thread.mutex);
+	auto *ws = wayland_thread.window_get_state(p_window_id);
+	Rect2 rect = p_rect;
+	if (ws && ws->legacy_shell_surface && windows.has(p_window_id)) {
+		rect = AuroraOrientation::transform_rect(rect, windows[p_window_id].rect.size, (4 - aurora_transform) % 4);
+	}
+	return wayland_thread.aurora_set_ime_rect(rect, p_window_id);
 }
 void DisplayServerWayland::virtual_keyboard_show(const String &, const Rect2 &, DisplayServerEnums::VirtualKeyboardType type, int, int, int) {
 	MutexLock lock(wayland_thread.mutex);
@@ -384,7 +422,7 @@ void DisplayServerWayland::virtual_keyboard_show(const String &, const Rect2 &, 
 }
 void DisplayServerWayland::virtual_keyboard_hide() {
 	MutexLock lock(wayland_thread.mutex);
-	wayland_thread.window_set_ime_active(false, DisplayServerEnums::MAIN_WINDOW_ID);
+	wayland_thread.aurora_hide_keyboard();
 }
 int DisplayServerWayland::virtual_keyboard_get_height() const {
 	MutexLock lock(wayland_thread.mutex);
