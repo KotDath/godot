@@ -36,6 +36,7 @@
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/json.h"
 #include "core/os/os.h"
 #include "core/os/shared_object.h"
 #include "editor/editor_node.h"
@@ -277,15 +278,36 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 	option("--engine-copyright", stage_path.path_join("COPYRIGHT.txt"));
 	option("--output", stage_path.path_join("rpms"));
 	arguments.push_back("--bundle-xkbcommon");
+	Array native_libraries;
 	HashSet<String> seen_paths;
 	for (const SharedObject &object : shared_objects) {
 		String path = ProjectSettings::get_singleton()->globalize_path(object.path);
-		if (seen_paths.has(path)) {
+		String project = ProjectSettings::get_singleton()->localize_path(object.path).simplify_path();
+		if (!project.begins_with("res://")) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora native library", "Native libraries must be inside the project: " + object.path);
+			return ERR_INVALID_DATA;
+		}
+		String identity = project + "\n" + object.target;
+		if (seen_paths.has(identity)) {
 			continue;
 		}
-		seen_paths.insert(path);
-		option("--private-library", path);
+		seen_paths.insert(identity);
+		Dictionary library;
+		library["source"] = path;
+		library["project"] = project;
+		library["target"] = object.target;
+		library["sha256"] = FileAccess::get_sha256(path);
+		native_libraries.push_back(library);
 	}
+	Dictionary native_map;
+	native_map["schema"] = 1;
+	native_map["libraries"] = native_libraries;
+	String native_map_path = stage_path.path_join("native-input.json");
+	Ref<FileAccess> native_map_file = FileAccess::open(native_map_path, FileAccess::WRITE, &error);
+	ERR_FAIL_COND_V(error != OK, error);
+	native_map_file->store_string(JSON::stringify(native_map));
+	native_map_file.unref();
+	option("--native-map", native_map_path);
 	String output;
 	int exit_code = -1;
 	error = execute_sdk(p_preset->get("sdk/sfdk"), arguments, &output, &exit_code);

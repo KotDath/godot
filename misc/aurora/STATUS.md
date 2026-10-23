@@ -3,6 +3,42 @@
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
+## Native library trees and reload acceptance (point 8, software part)
+
+The desktop exporter now sends a schema-1 source/resource/target map with host
+SHA256 for every selected project DSO. The packager preserves plugin directories,
+honours explicit dependency targets, and writes a schema-2 installed manifest.
+Every DSO receives its own `$ORIGIN`-relative RUNPATH to its private dependencies.
+The Aurora loader uses the exact resource URI; a missing mapped entry cannot
+silently select another plugin by basename. Earlier flat editor/RPM layouts remain
+compatible. Private basenames/SONAME identities remain globally unique; there is
+no new ELF namespace or automatic SONAME rewriting. See [NATIVE_LIBRARIES.md](NATIVE_LIBRARIES.md).
+
+Validation: Linux editor and ARM64/ARM32 debug templates build; 13 Python packaging
+cases and 10 C++ mapping assertions pass. The new `native_layout_smoke` fixture
+returns 42 on the host. Its ARM packages place extension, bridge and leaf in three
+different directories, including source paths with spaces and explicit targets.
+Both `ru.kotdath.godotnested` 1.0.0-1 RPMs pass Regular validation with the existing
+non-Silica warning. Extracted final RPM ELF metadata matches the manifests,
+all three resource mappings exist, and each private RUNPATH reaches its dependency.
+ARM32 hard-float and absence of host DSOs are checked. Four real SDK negative
+controls reject wrong architecture, incomplete closure, duplicate basename and
+mismatched SONAME before producing an RPM. Final packages were signed with public
+SDK test credentials, with signature dumps checked; no root-CA verification.
+Local artifacts: `.aurora-tools/native-layout-rpms/signed-final/`.
+
+The godot-cpp fork's `a7790bf` adds an opt-in hot-reload fixture. Six desktop Linux
+reloads switch between two code revisions while preserving the existing ObjectID
+and stored state; no old deleted DSO mappings remain. SCons builds both revisions
+for each ARM, and CMake builds revision 1 for both. All six ARM outputs have the
+correct ABI, exactly `$ORIGIN` RUNPATH and no GNU UNIQUE symbols; CMake propagates
+hot-reload accounting/options to the extension and bindings.
+
+Still pending: executing the nested package and hot reload on Aurora, including
+normal sandbox versus developer launch. The one KVADRA tablet became unreachable
+through both USB/Wi-Fi aliases after reporting 2% battery and Charging. Neither
+device check is counted as passed. ARM32 hardware remains excluded from the goal.
+
 ## Native composition focus loss and input policy (point 4, fourth part)
 
 Fixed a real device failure where leaving the app cleared an uncommitted native
@@ -316,9 +352,9 @@ libxkbcommon is bundled with its license because it is not Regular public API.
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
 - Broader deployment recovery/cancellation and encrypted-key signing UI;
-  Windows/macOS host packaging and broader RPM layout support.
+  Windows/macOS host packaging and Aurora execution of nested RPM layouts.
 - PSDK and BT build validation, Vulkan hardware presentation, ARM32 occlusion
-  backend, broader Embree performance/editor checks, hot reload.
+  backend, broader Embree performance/editor checks, Aurora hot-reload acceptance.
 - Keep Linux changes minimal: reuse existing Wayland sources with small guarded
   hooks; do not extract a new shared Wayland layer (user decision).
 - Detailed implementation and priority order: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).

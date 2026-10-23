@@ -8,13 +8,92 @@ and device smoke tests. No signing credentials are read here.
 import argparse
 import hashlib
 import json
+import posixpath
 import re
 import shlex
 import shutil
 import struct
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+
+def relative_native_path(value):
+    """Canonical package-relative paths, never host paths or RPM macros."""
+    if not isinstance(value, str) or not value or any(ord(char) < 32 or char in "\\:%$\x7f" for char in value):
+        raise ValueError("Invalid native relative path: " + str(value))
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in ("", ".", "..") for part in value.split("/")):
+        raise ValueError("Invalid native relative path: " + value)
+    return path
+
+
+def read_native_map(path):
+    if path is None:
+        return []
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("schema") != 1 or not isinstance(document.get("libraries"), list):
+        raise ValueError("Unsupported native input map")
+    entries = []
+    for item in document["libraries"]:
+        project = item["project"]
+        if not isinstance(project, str) or not project.startswith("res://"):
+            raise ValueError("Native library must have a project resource path")
+        relative = relative_native_path(project[6:])
+        source = Path(item["source"]).absolute()
+        if source.name != relative.name:
+            raise ValueError("Native source and project filenames differ: " + project)
+        target_folder = item.get("target", "")
+        target = (
+            PurePosixPath(source.name)
+            if target_folder == "."
+            else (relative_native_path(target_folder) / source.name if target_folder else relative)
+        )
+        digest = item.get("sha256")
+        if digest is not None:
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+                raise ValueError("Invalid native source SHA256")
+            if hashlib.sha256(source.read_bytes()).hexdigest() != digest.lower():
+                raise ValueError("Native SHA256 mismatch: refresh the SDK shared file: " + str(source))
+        entries.append((source, project, PurePosixPath("lib/project") / target))
+    return entries
+
+
+def native_layout(files, entries):
+    """Keep CLI private libraries flat; exported project libraries keep their tree."""
+    destinations = {path: PurePosixPath("lib") / path.name for path in files}
+    project_paths = {}
+    mapped_sources = set()
+    for source, project, destination in entries:
+        if source in mapped_sources and destinations[source] != destination:
+            raise ValueError("One native source has conflicting installation targets: " + str(source))
+        if project in project_paths and project_paths[project] != str(destination):
+            raise ValueError("Conflicting native project mapping: " + project)
+        mapped_sources.add(source)
+        destinations[source] = destination
+        project_paths[project] = str(destination)
+    if len(set(destinations.values())) != len(destinations):
+        raise ValueError("Native installation path collision")
+    return destinations, project_paths
+
+
+def private_runpath(path, info, files, destinations):
+    by_name = {source.name: source for source in files}
+    directories = {"$ORIGIN"}
+    for dependency in info["needed"]:
+        if dependency in by_name:
+            relative = posixpath.relpath(destinations[by_name[dependency]].parent, destinations[path].parent)
+            if relative != ".":
+                directories.add("$ORIGIN/" + relative)
+    return ":".join(sorted(directories))
+
+
+def valid_origin_runpath(value):
+    if value == "$ORIGIN":
+        return True
+    return value.startswith("$ORIGIN/") and not any(
+        ord(char) < 32 or char in "\\:%$\x7f" for char in value[len("$ORIGIN/") :]
+    )
 
 
 def elf_info(path):
@@ -45,15 +124,17 @@ def validate_native(files, arch):
             raise ValueError("Architecture mismatch: " + str(path))
         if path.name in manifest:
             raise ValueError("Native file name collision: " + path.name)
-        if any(value != "$ORIGIN" for value in info["runpath"]):
-            raise ValueError("Only private $ORIGIN RUNPATH is allowed: " + str(path))
+        if any(not valid_origin_runpath(entry) for value in info["runpath"] for entry in value.split(":")):
+            raise ValueError("Only private $ORIGIN-relative RUNPATH is allowed: " + str(path))
         if info["soname"] and info["soname"] != [path.name]:
             raise ValueError("Supply a file named after its SONAME: " + str(path))
         manifest[path.name] = info
     for name, info in manifest.items():
         for dependency in info["needed"]:
+            if not re.fullmatch(r"[A-Za-z0-9_+.-]+", dependency):
+                raise ValueError("DT_NEEDED must be a library name, not a path: " + dependency)
             if dependency in manifest:
-                if name != files[0].name and "$ORIGIN" not in info["runpath"]:
+                if name != files[0].name and not info["runpath"]:
                     raise ValueError("Missing $ORIGIN RUNPATH in " + name)
             else:
                 # Resolve only target system libraries. No host libraries or
@@ -97,6 +178,7 @@ def main():
     parser.add_argument("--pck-sha256", help="PCK SHA256 calculated on the export host; detects stale SDK reads")
     parser.add_argument("--strip", default="strip", help="Target strip executable for embedded-PCK packages")
     parser.add_argument("--native-dir", type=Path)
+    parser.add_argument("--native-map", type=Path, help="Export host's resource-path/source/target map (schema 1)")
     parser.add_argument("--probe", type=Path)
     parser.add_argument("--private-library", type=Path, action="append", default=[])
     parser.add_argument("--patchelf", default="patchelf")
@@ -136,12 +218,24 @@ def main():
     if not version_match or tuple(map(int, version_match.groups())) < (0, 18):
         parser.error("patchelf >= 0.18 is required to preserve ELF build IDs")
     files = [args.binary.resolve()]
-    files += args.private_library
+    files += [path.absolute() for path in args.private_library]
     if args.native_dir:
         files += sorted(path.resolve() for path in args.native_dir.iterdir() if path.is_file())
+    entries = read_native_map(args.native_map)
+    files += [source for source, _, _ in entries]
     if args.probe:
         files.append(args.probe.resolve())
-    validate_native(files, args.arch)
+    files = list(dict.fromkeys(files))
+    source_manifest = validate_native(files, args.arch)
+    private_files = [
+        path for path in files if path != args.binary.resolve() and not (args.probe and path == args.probe.resolve())
+    ]
+    destinations, project_paths = native_layout(private_files, entries)
+    for path in private_files:
+        if path.name in source_manifest[args.binary.resolve().name]["needed"] and destinations[
+            path
+        ].parent != PurePosixPath("lib"):
+            raise ValueError("Main executable dependencies must use the flat private lib directory: " + path.name)
     output = args.output.resolve()
     if "%" in str(output):
         parser.error("RPM output path must not contain RPM macro characters (%)")
@@ -154,12 +248,13 @@ def main():
         stage = top / "stage"
         native = stage / appdir
         native.mkdir(parents=True)
-        for path in files:
-            if path == args.binary.resolve() or (args.probe and path == args.probe.resolve()):
-                continue
-            shutil.copy2(path, native / path.name)
-            (native / path.name).chmod(0o644)
-            subprocess.run([args.patchelf, "--set-rpath", "$ORIGIN", str(native / path.name)], check=True)
+        for path in private_files:
+            installed = stage / datadir / destinations[path]
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, installed)
+            installed.chmod(0o644)
+            runpath = private_runpath(path, source_manifest[path.name], private_files, destinations)
+            subprocess.run([args.patchelf, "--set-rpath", runpath, str(installed)], check=True)
         data = stage / datadir
         data.mkdir(parents=True, exist_ok=True)
         licenses = data / "licenses"
@@ -187,8 +282,14 @@ def main():
             # Strip first, then append using Godot's self-contained footer.
             subprocess.run([args.strip, "--strip-unneeded", str(launcher)], check=True)
             append_pck(launcher, args.pck, args.pck_sha256)
-        installed_manifest = {args.name: elf_info(launcher)}
-        installed_manifest.update({path.name: elf_info(path) for path in native.iterdir()})
+        installed_manifest = {
+            "schema": 2,
+            "project_libraries": project_paths,
+            "files": {"/usr/bin/" + args.name: elf_info(launcher)},
+        }
+        for path in private_files:
+            installed = stage / datadir / destinations[path]
+            installed_manifest["files"][str(destinations[path])] = elf_info(installed)
         (data / "native-manifest.json").write_text(json.dumps(installed_manifest, indent=2) + "\n")
         if args.probe:
             libexec = stage / "usr/libexec" / args.name
@@ -229,11 +330,13 @@ def main():
             for path in files
             if path != args.binary.resolve() and not (args.probe and path == args.probe.resolve())
         ]
-        if not all(re.fullmatch(r"[A-Za-z0-9_.-]+", name) for name in private_names):
+        if not all(re.fullmatch(r"[A-Za-z0-9_+.-]+", name) for name in private_names):
             raise ValueError("Unsupported private library filename")
         # Bracket expressions survive RPM macro expansion without extra levels
         # of backslash escaping (which otherwise silently break the filter).
-        private_regex = "^(" + "|".join(name.replace(".", "[.]") for name in private_names) + ")([(].*)?$"
+        private_regex = (
+            "^(" + "|".join(name.replace(".", "[.]").replace("+", "[+]") for name in private_names) + ")([(].*)?$"
+        )
         spec = top / "package.spec"
         spec.write_text(
             """Name: {name}

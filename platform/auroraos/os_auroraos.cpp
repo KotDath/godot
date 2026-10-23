@@ -30,7 +30,11 @@
 
 #include "os_auroraos.h"
 
+#include "native_library_map.h"
+
+#include "core/config/project_settings.h"
 #include "core/io/file_access.h"
+#include "core/io/json.h"
 #include "core/os/main_loop.h"
 #include "main/main.h"
 #include "servers/display/display_server.h"
@@ -92,10 +96,35 @@ String OS_AuroraOS::get_cache_path() const {
 
 Error OS_AuroraOS::open_dynamic_library(const String &p_path, void *&p_library_handle, GDExtensionData *p_data) {
 	// Regular-profile RPMs keep private DSOs in the application's data tree.
-	// Project-local files take precedence while editing. The packager must
-	// reject duplicate basenames before flattening private libraries here.
+	// Real project-local files take precedence while editing. Exported resources
+	// use an exact project-path map, rather than guessing from a basename.
 	if (!FileAccess::exists(p_path)) {
-		String installed = String("/usr/share").path_join(get_executable_path().get_file()).path_join("lib").path_join(p_path.get_file());
+		const String data_dir = String("/usr/share").path_join(get_executable_path().get_file());
+		const String manifest_path = data_dir.path_join("native-manifest.json");
+		Dictionary project_libraries;
+		if (FileAccess::exists(manifest_path)) {
+			JSON manifest;
+			Error error = manifest.parse(FileAccess::get_file_as_string(manifest_path));
+			ERR_FAIL_COND_V_MSG(error != OK || manifest.get_data().get_type() != Variant::DICTIONARY, ERR_INVALID_DATA, "Invalid Aurora native library manifest.");
+			const Dictionary document = manifest.get_data();
+			ERR_FAIL_COND_V_MSG(document.has("schema") && int(document["schema"]) != 2, ERR_INVALID_DATA, "Unsupported Aurora native library manifest schema.");
+			if (int(document.get("schema", 0)) == 2) {
+				ERR_FAIL_COND_V_MSG(document.get("project_libraries", Variant()).get_type() != Variant::DICTIONARY, ERR_INVALID_DATA, "Missing Aurora project library map.");
+				project_libraries = document["project_libraries"];
+			}
+		}
+		if (!project_libraries.is_empty()) {
+			String project_path = p_data && p_data->r_resolved_path ? *p_data->r_resolved_path : p_path;
+			project_path = ProjectSettings::get_singleton()->localize_path(project_path);
+			if (project_path.is_relative_path()) {
+				project_path = "res://" + project_path;
+			}
+			const String relative = AuroraNativeLibrary::mapped_path(project_path, project_libraries);
+			ERR_FAIL_COND_V_MSG(relative.is_empty(), ERR_FILE_NOT_FOUND, "No installed Aurora library mapping for " + project_path);
+			return OS_Unix::open_dynamic_library(data_dir.path_join(relative), p_library_handle, p_data);
+		}
+		// Compatibility for earlier RPMs and manually packaged editor libraries.
+		String installed = data_dir.path_join("lib").path_join(p_path.get_file());
 		if (FileAccess::exists(installed)) {
 			return OS_Unix::open_dynamic_library(installed, p_library_handle, p_data);
 		}
