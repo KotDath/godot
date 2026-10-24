@@ -3,7 +3,7 @@ from misc.utility.scons_hints import *
 
 Import("env")
 
-sources = ["godot_auroraos.cpp", "os_auroraos.cpp"]
+sources = ["godot_auroraos.cpp", "os_auroraos.cpp", "remote_session.cpp"]
 if env["wayland"]:
     sources += ["legacy_shell.cpp", "text_input_v2.cpp", "orientation_wayland.cpp"]
     sources += SConscript("#platform/linuxbsd/wayland/SCsub")

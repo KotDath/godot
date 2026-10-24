@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "os_auroraos.h"
+#include "remote_session.h"
 
 #include "core/profiling/profiling.h"
 #include "main/main.h"
@@ -37,6 +38,10 @@
 #include <cstdlib>
 
 int main(int argc, char *argv[]) {
+	int session_exit = 0;
+	if (aurora_remote_session_main(argc, argv, session_exit)) {
+		return session_exit;
+	}
 	godot_init_profiler();
 	OS_AuroraOS os;
 	setlocale(LC_CTYPE, "");

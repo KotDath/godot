@@ -7,6 +7,27 @@ Hardware inventory: `phone` (192.168.2.44) and `usb-serial-phone` (192.168.3.5)
 are USB/Wi-Fi connections to the **same KVADRA ARM64 tablet**. They do not count
 as two physical test devices. Real ARM32 hardware has not been supplied yet.
 
+## Recoverable remote-session backend (point 2, integration pending)
+
+Added an Aurora-only native supervisor mode before OS/display initialization.
+It detaches, reserves a token once, publishes boot/PID/start-time records before
+allowing the game to exec, survives a lost transport, and records completion.
+Stop writes a persistent fence, including for a launch that has not arrived yet.
+Only the supervisor signals its own child/group, retaining the unreaped leader
+until the final signal. The shell never kills a PID from a possibly stale record.
+
+Eight acceptance tests compile the actual native source and pass, including
+duplicate requests, lost replies, late-launch fencing, a TERM-ignoring descendant,
+unaffected foreign processes and supervisor HUP/TERM. ARM32/ARM64 debug templates
+build; both actual ARM executables pass the capability probe and native fork/exec/
+exit/fence smoke inside the SDK. These are SDK/emulation results, not hardware.
+
+This backend is not yet connected to the exporter's existing Run/Stop commands.
+The local persistent journal, template-capability gate, restored Stop entry and
+installation-outcome reconciliation remain open. Editor/release-template builds
+for the new mode and physical ARM64 acceptance remain pending. Architecture,
+protocol and reproduction: [REMOTE_SESSION.md](REMOTE_SESSION.md).
+
 ## Protected-key signing and cancellable SDK jobs (point 2)
 
 SDK commands now run in a worker while the editor pumps its progress UI. A
