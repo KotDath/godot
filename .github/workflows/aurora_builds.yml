@@ -1,0 +1,90 @@
+name: Aurora source and artifact matrix
+
+on:
+  push:
+    branches: [4.7.2_auroraos]
+    paths:
+      - 'misc/aurora/**'
+      - 'platform/auroraos/**'
+      - 'platform/linuxbsd/wayland/**'
+      - '.github/workflows/aurora_builds.yml'
+      - '.github/actionlint.yaml'
+  pull_request:
+    paths:
+      - 'misc/aurora/ci*.py'
+      - 'misc/aurora/test_ci_artifacts.py'
+      - '.github/workflows/aurora_builds.yml'
+      - '.github/actionlint.yaml'
+  workflow_dispatch:
+    inputs:
+      sdk:
+        description: Run the SDK matrix on a configured Aurora runner
+        type: boolean
+        default: false
+      godot_cpp_ref:
+        description: Exact godot-cpp revision
+        type: string
+        default: 690cda7d4eaf4470bd9b810aa9b77c958bb2c9ba
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  identity-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Git, file and real ELF identity controls
+        run: python3 -m unittest discover -s misc/aurora -p test_ci_artifacts.py -v
+
+  sdk-matrix:
+    # SDK execution is selected explicitly on the trusted Aurora branch.
+    # PRs run identity tests on hosted workers and never enter this job.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.sdk) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[aurora-sdk-ci]'))
+    needs: identity-tests
+    runs-on: [self-hosted, linux, aurora-sdk]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: engine
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: KotDath/godot-cpp
+          ref: ${{ inputs.godot_cpp_ref || '690cda7d4eaf4470bd9b810aa9b77c958bb2c9ba' }}
+          path: bindings
+          persist-credentials: false
+      - name: Clean-source builds, target APIs, extensions and unsigned RPMs
+        shell: bash
+        run: |
+          : "${AURORA_CI_CONFIG:?Configure this runner with a local Aurora SDK JSON}"
+          python3 engine/misc/aurora/ci.py build \
+            --config "$AURORA_CI_CONFIG" \
+            --engine "$GITHUB_WORKSPACE/engine" \
+            --godot-cpp "$GITHUB_WORKSPACE/bindings" \
+            --output "$GITHUB_WORKSPACE/../aurora-output-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Verify the published software bundle
+        shell: bash
+        run: |
+          python3 engine/misc/aurora/ci.py verify \
+            "$GITHUB_WORKSPACE/../aurora-output-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Upload manifest, artifacts and full diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aurora-${{ github.sha }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ github.workspace }}/../aurora-output-${{ github.run_id }}-${{ github.run_attempt }}/manifest.json
+            ${{ github.workspace }}/../aurora-output-${{ github.run_id }}-${{ github.run_attempt }}/artifacts/
+            ${{ github.workspace }}/../aurora-output-${{ github.run_id }}-${{ github.run_attempt }}/logs/

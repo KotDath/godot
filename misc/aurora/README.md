@@ -4,6 +4,9 @@ See [STATUS.md](STATUS.md) for actual test coverage and [PLAN.md](PLAN.md) for
 the architectural plan. Commands below run at the Godot repository root.
 The host Python/SCons are build tools, not target runtime dependencies.
 
+The clean-source software matrix and artifact verifier are described in
+[CI.md](CI.md). Physical device results remain separate in STATUS.md.
+
 ## SDK bootstrap and compilation
 
 Install target development packages `wayland-devel`, `wayland-egl-devel`,
