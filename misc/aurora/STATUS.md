@@ -8,6 +8,43 @@ Hardware inventory: `phone` (Wi-Fi, 192.168.2.44) and
 are USB/Wi-Fi connections to the **same KVADRA ARM64 tablet**. They do not count
 as two physical test devices. Real ARM32 hardware has not been supplied yet.
 
+## Vulkan WSI diagnostic (point 6, software part)
+
+Added a standalone probe creating a real Wayland surface/swapchain and checking
+the chosen graphics/present queue, format, usage and transforms. It renders four
+color quadrants, verifies GPU readback pixels, waits for compositor frame
+callbacks and replaces the swapchain halfway through. Replacement is explicitly
+labelled as forced, not real resize. There is no link-time Vulkan/Qt dependency
+or change to the engine's Linux backend.
+
+Native Linux **RADV/AMD Radeon 8060S and llvmpipe** both pass 60 presents,
+60 exact readbacks, 60 callbacks, two swapchains and zero validation errors under
+a private KWin virtual compositor/D-Bus/runtime. Khronos layer 1.4.341 is supplied
+from a signature-verified, locally unpacked Fedora RPM; core, thread and
+synchronization validation are requested explicitly. Strict tests require present
+fences; they are waited before replacing/freeing resources. The diagnostic also
+reports the unextended Vulkan idle/presentation limitation when that extension
+is unavailable, rather than claiming safe teardown from device idle alone.
+
+Five negative controls pass: missing loader, nonexistent device index, missing
+compositor, deliberately wrong expected pixel and process watchdog. The pixel
+control renders normally but must reject the actual readback; it exits 5 with
+zero validation errors. A path containing spaces passes the whole host runner.
+
+Both SDK ARM builds pass `-Wall -Wextra -Werror`, with correct ELF32/ARM and
+ELF64/AArch64 headers and no Vulkan/Qt DT_NEEDED. Their actual executables also
+return the expected missing-loader failure inside SDK target execution/emulation.
+That is neither physical ARM nor target presentation evidence. Local final
+evidence: `.aurora-tools/vulkan wsi verified/` and
+`.aurora-tools/vulkan-wsi-arm{32,64}-final/`.
+
+KVADRA previously had no Vulkan loader/ICD or Mali Vulkan entry points and is
+currently unreachable. A compatible vendor stack or another Vulkan-capable
+Aurora device is still required. Aurora legacy-shell presentation, real resize,
+rotation, lifecycle/device loss, sustained presentation, and Godot Mobile/
+Forward+ remain unaccepted. Architecture and reproduction:
+[VULKAN_WSI.md](VULKAN_WSI.md), [VULKAN.md](VULKAN.md).
+
 ## Window activation and editor return (point 3, software part)
 
 Added an Aurora-only adapter for initial legacy-toplevel activation and explicit

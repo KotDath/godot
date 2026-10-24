@@ -201,6 +201,17 @@ supportedTransforms и preTransform, исключая двойной повор�
 длительная работа без device loss. Название Mali не доказывает доступность Vulkan
 в поставленном OS graphics stack. Отсутствующий драйвер не заменяется loader-ом.
 
+Добавлен самостоятельный WSI probe: Wayland surface, проверка graphics/present
+queue и форматов, swapchain, четыре цветных квадранта с GPU readback, compositor
+frame callbacks и пересоздание. На Linux RADV и llvmpipe проходят по 60 кадров/
+readback/callbacks, два swapchain и ноль ошибок validation layers. Отрицательные
+проверки ловят неверные пиксели и ошибки окружения; watchdog ограничивает процесс.
+Обе ARM-версии собраны и выполняют отрицательный startup внутри SDK, без заявления
+аппаратной поддержки. На KVADRA ранее подтверждено отсутствие Vulkan loader/ICD;
+нужен совместимый vendor stack либо другое Vulkan-устройство с Авророй.
+Godot Mobile/Forward+, настоящий resize/поворот и lifecycle не приняты.
+Контракт и воспроизведение: [VULKAN_WSI.md](VULKAN_WSI.md).
+
 ## 7. Raycast/Embree и occlusion culling
 
 Отключённый module_raycast не означает отключение физических RayCast3D.

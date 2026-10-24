@@ -64,8 +64,10 @@ No system graphics libraries or device graphics settings were replaced.
 
 ## Still required
 
-- Real Wayland surface/swapchain probe; advertised `VK_KHR_wayland_surface` alone
-  is insufficient evidence of presentation support.
+- The new [WSI diagnostic](VULKAN_WSI.md) creates a surface, presents/readbacks
+  frames and replaces its swapchain. Linux RADV/llvmpipe pass; both ARM probes
+  compile. Execute it on a Vulkan-capable Aurora stack; advertised
+  `VK_KHR_wayland_surface` alone is insufficient evidence of presentation.
 - Mobile renderer, then Forward+, feature/format/queue checks on both ARM ABIs.
 - Coordinate/rotation validation against currentTransform/preTransform. Existing
   GLES client-side rotation must not be assumed correct for Vulkan.
