@@ -15,6 +15,43 @@ spec.loader.exec_module(package)
 
 
 class EmbeddedPackTests(unittest.TestCase):
+    def test_runtime_receipt_hashes_final_pack_and_nested_private_library(self):
+        with tempfile.TemporaryDirectory(prefix="aurora receipt ") as directory:
+            stage = Path(directory)
+            executable = stage / "usr/bin/org.example.game"
+            library = stage / "usr/share/org.example.game/lib/plugin dir/ёж.so"
+            executable.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            executable.write_bytes(b"stripped ELF")
+            library.write_bytes(b"patched private ELF")
+            pck = stage / "export.pck"
+            pck.write_bytes(b"GDPC" + b"resources" * 150000)
+            package.append_pck(executable, pck)
+            receipt = package.runtime_receipt(
+                stage, [executable, library], "org.example.game", "1.0.0", "1.godot.42", "arm64"
+            )
+            self.assertEqual(receipt["version"], "1.0.0")
+            self.assertEqual(receipt["release"], "1.godot.42")
+            self.assertEqual(
+                receipt["files"],
+                {
+                    "/usr/bin/org.example.game": hashlib.sha256(executable.read_bytes()).hexdigest(),
+                    "/usr/share/org.example.game/lib/plugin dir/ёж.so": hashlib.sha256(
+                        library.read_bytes()
+                    ).hexdigest(),
+                },
+            )
+            self.assertNotIn(directory, json.dumps(receipt))
+            pck.write_bytes(b"GDPCchanged game")
+            executable.write_bytes(b"stripped ELF")
+            package.append_pck(executable, pck)
+            changed = package.runtime_receipt(
+                stage, [executable, library], "org.example.game", "1.0.0", "1.godot.42", "arm64"
+            )
+            self.assertNotEqual(
+                changed["files"]["/usr/bin/org.example.game"], receipt["files"]["/usr/bin/org.example.game"]
+            )
+
     def test_rejects_truncated_sdk_view_of_pack(self):
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / "game"

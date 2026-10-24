@@ -30,9 +30,12 @@
 
 #include "remote_deploy_state.h"
 
+#include "apm_reconcile.h"
+
 #include "core/io/dir_access.h"
 #include "core/io/json.h"
 #include "core/os/os.h"
+#include "core/variant/array.h"
 
 namespace AuroraDeploy {
 bool valid_token(const String &p_token) {
@@ -53,7 +56,7 @@ bool valid_record(const Dictionary &p_record) {
 	// JSON parses numeric tokens as FLOAT. Variant's C++ equality is a strict
 	// hash comparison, so comparing the parsed value to Variant(1) rejects our
 	// own on-disk journal even though its JSON version is exactly 1.
-	if ((schema.get_type() != Variant::INT && schema.get_type() != Variant::FLOAT) || double(schema) != 1.0 || !valid_token(p_record.get("token", ""))) {
+	if ((schema.get_type() != Variant::INT && schema.get_type() != Variant::FLOAT) || (double(schema) != 1.0 && double(schema) != 2.0) || !valid_token(p_record.get("token", ""))) {
 		return false;
 	}
 	for (const String &key : { String("sfdk"), String("device"), String("package"), String("phase"), String("rpm"), String("staging") }) {
@@ -65,7 +68,7 @@ bool valid_record(const Dictionary &p_record) {
 		return false;
 	}
 	String phase = p_record["phase"];
-	if (phase != "installing" && phase != "launching" && phase != "running" && phase != "stopping") {
+	if (phase != "installing" && phase != "launching" && phase != "running" && phase != "stopping" && !(double(schema) == 2 && phase == "ready")) {
 		return false;
 	}
 	PackedStringArray parts = String(p_record["package"]).split(".");
@@ -75,6 +78,34 @@ bool valid_record(const Dictionary &p_record) {
 	for (const String &part : parts) {
 		if (!part.is_valid_ascii_identifier()) {
 			return false;
+		}
+	}
+	if (double(schema) == 2) {
+		String package = p_record["package"];
+		if (p_record.get("runtime_verified", Variant()).get_type() != Variant::BOOL || (bool(p_record["install_unconfirmed"]) && bool(p_record["runtime_verified"])) || ((phase == "running" || phase == "launching") && !bool(p_record["runtime_verified"]))) {
+			return false;
+		}
+		if (p_record.get("receipt", Variant()).get_type() != Variant::DICTIONARY || !AuroraAPM::valid_receipt(p_record["receipt"], package) || p_record.get("launch_args", Variant()).get_type() != Variant::ARRAY) {
+			return false;
+		}
+		Array args = p_record["launch_args"];
+		if (args.is_empty() || args.size() > 2048 || args[0] != Variant("/usr/bin/" + package)) {
+			return false;
+		}
+		for (int index = 1; index < args.size(); index++) {
+			if (args[index].get_type() != Variant::STRING) {
+				return false;
+			}
+			String flag = args[index];
+			if (flag == "--debug-collisions" || flag == "--debug-navigation") {
+				continue;
+			}
+			if (flag != "--remote-debug" && flag != "--breakpoints") {
+				return false;
+			}
+			if (++index >= args.size() || args[index].get_type() != Variant::STRING || String(args[index]).is_empty()) {
+				return false;
+			}
 		}
 	}
 	return true;
@@ -185,7 +216,7 @@ Error load_record(const String &p_path, Dictionary &r_record) {
 	if (error != OK) {
 		return error;
 	}
-	if (file->get_length() > 16384) {
+	if (file->get_length() > 1024 * 1024) {
 		return ERR_INVALID_DATA;
 	}
 	JSON json;
@@ -201,7 +232,7 @@ Error save_record(const String &p_path, const Dictionary &p_record) {
 		return ERR_INVALID_DATA;
 	}
 	String encoded = JSON::stringify(p_record);
-	if (encoded.utf8().length() > 16384) {
+	if (encoded.utf8().length() > 1024 * 1024) {
 		return ERR_INVALID_DATA;
 	}
 	Error error = DirAccess::make_dir_recursive_absolute(p_path.get_base_dir());

@@ -69,6 +69,8 @@ struct Job {
 	Vector<uint8_t> raw_out;
 	Vector<uint8_t> raw_err;
 	String output;
+	String stdout_output;
+	String stderr_output;
 	int exit_code = -1;
 	Error error = OK;
 
@@ -230,7 +232,9 @@ void run_job(void *p_data) {
 	}
 	if (!job.secret) {
 		job.append(String::utf8((const char *)job.raw_out.ptr(), job.raw_out.size()));
-		job.append(String::utf8((const char *)job.raw_err.ptr(), job.raw_err.size()));
+		job.stdout_output = job.output;
+		job.stderr_output = String::utf8((const char *)job.raw_err.ptr(), job.raw_err.size());
+		job.append(job.stderr_output);
 	}
 	if (!job.killed.is_set()) {
 		const int transport_code = OS::get_singleton()->get_process_exit_code(pid);
@@ -288,7 +292,7 @@ public:
 };
 } // namespace
 
-Error execute(const String &p_path, const List<String> &p_arguments, const String &p_stage, String *r_output, int *r_exit_code, const Dictionary &p_secret_environment) {
+Error execute(const String &p_path, const List<String> &p_arguments, const String &p_stage, String *r_output, int *r_exit_code, const Dictionary &p_secret_environment, String *r_stdout, String *r_stderr) {
 	Job job;
 	job.path = p_path;
 	job.stage = p_stage;
@@ -335,6 +339,12 @@ Error execute(const String &p_path, const List<String> &p_arguments, const Strin
 	}
 	if (r_exit_code) {
 		*r_exit_code = job.exit_code;
+	}
+	if (r_stdout) {
+		*r_stdout = job.stdout_output;
+	}
+	if (r_stderr) {
+		*r_stderr = job.stderr_output;
 	}
 	return job.error;
 }

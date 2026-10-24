@@ -80,7 +80,16 @@ func _process(delta: float) -> void:
 			_finish(saved.get("phase") == "launching", "unconfirmed launch survived editor exit")
 		elif mode == "success":
 			_finish(saved.get("phase") == "running", "confirmed launch survived editor exit")
-		elif mode == "recover_run":
+		elif mode == "install_pending":
+			_finish(saved.get("phase") == "installing" and saved.get("install_unconfirmed", false), "installation reply lost, exported package retained")
+		elif mode == "activation_pending":
+			_finish(saved.get("phase") == "ready" and not saved.get("runtime_verified", true), "registered runtime is not yet active")
+		elif mode == "activation_loss":
+			if saved.get("phase") != "ready" or saved.get("runtime_verified", true) or saved.get("install_unconfirmed", true):
+				_finish(false, "earlier runtime verification was not revoked")
+				return
+			phase = 2
+		elif mode in ["recover_run", "install_recover", "activation_recover", "success_stop"]:
 			if saved.get("phase") != "running":
 				_finish(false, "recovery did not adopt running session")
 				return

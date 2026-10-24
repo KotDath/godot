@@ -34,6 +34,8 @@
 #include "core/variant/dictionary.h"
 
 namespace AuroraSDK {
-Error execute(const String &p_path, const List<String> &p_arguments, const String &p_stage, String *r_output, int *r_exit_code, const Dictionary &p_secret_environment = Dictionary());
+// r_output keeps the combined diagnostic stream. Optional separate captures
+// allow strict parsing of command stdout without SDK warnings from stderr.
+Error execute(const String &p_path, const List<String> &p_arguments, const String &p_stage, String *r_output, int *r_exit_code, const Dictionary &p_secret_environment = Dictionary(), String *r_stdout = nullptr, String *r_stderr = nullptr);
 Error request_passphrase(String &r_passphrase);
 } // namespace AuroraSDK

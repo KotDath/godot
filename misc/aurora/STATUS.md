@@ -29,21 +29,47 @@ already running game without another install/launch. Stop fences a missing/late
 request before clearing the record. Runtime capability is checked in ARM ELF load
 segments before contacting the device; appended PCK text cannot satisfy the gate.
 
-Three C++ cases / 37 assertions pass, including schema JSON round-trip. The real
-restart test found strict Variant equality rejected JSON's numeric `1.0`; fixed
-the codec to accept numeric version 1 while rejecting other types/versions.
-Six editor-menu cases pass using real SDK RPM packaging/validation/development
-signing and a **fake device** with the actual native supervisor: recovered launch
-without duplication, Stop after editor restart, uncertain installation retention,
-template preflight, late-launch fencing and journal-write failure before deployment.
-These establish controller/software behavior, not physical device acceptance.
+Installation recovery now queries `ru.omp.APM.GetPackage` for the exact ID and
+unique `version-release`, checks pending upgrades when supported, then compares
+SHA256 for the active executable/PCK, manifest and **every private DSO** against a
+host-retained runtime receipt. The receipt is computed after ELF edits/stripping
+and PCK append. A matching APM entry alone cannot authorize an older active runtime.
+No installation is replayed during recovery. Capability detection uses errors,
+without an OS-version gate or an audb dependency. An unknown install cannot be
+resolved without APM; an SDK-confirmed install can lack the read API but must
+still match all active-file identities.
 
-An unconfirmed installation retains its signed RPM/staging. Run does not blindly
-submit another installation. Explicit Stop fences launch, archives the uncertain
-operation and preserves the package; it does not roll back or prove installation.
-Automatic APM outcome reconciliation and physical ARM64 SDK/sandbox acceptance
-remain open. Linux and both ARM editor builds pass; both ARM release templates
-also build and pass native fork/exec/exit/fence SDK smoke. Final clean-source
+The version-2 journal stores receipts and supported non-secret debug arguments;
+old version-1 records remain readable for Stop. Unverified installation/activation
+retains its signed RPM/staging. Stop fences launch, archives the record and retains
+the package; it does not roll back installation. Confirmed recovery cleans only
+its marked staging RPM/owner file, leaving unknown contents intact.
+
+The controller/APM C++ regression passes **7 cases / 84 assertions**, including
+GVariant parsing, exact checksum sets, confined receipt paths, supported launch
+arguments, ARM ELF capability boundaries and JSON versions 1/2. The complete
+Aurora C++ regression passes **15 cases / 195 assertions**; all **38 Python cases**
+pass, including actual native-source session tests.
+
+**14 editor-menu scenarios** pass using real SDK RPM packaging/Regular validation/
+development signing and a **fake device** with the actual native supervisor.
+They include restart recovery, lost install/launch replies, stale native DSO,
+pending upgrade, version mismatch, unavailable API, late-request fencing and
+journal-write failure. Final signed RPM payload hashes are independently verified
+after extraction; fake checksum replies hash actual extracted bytes. No duplicate
+installation/game is submitted during recovery. A negative control reproduces
+an earlier successful verification incorrectly surviving a failed recheck;
+the fix now revokes it durably and Stop retains the uncertain RPM. ARM32
+committed-install recovery also passes, with extracted ELF/manifest/RUNPATH closure
+and actual payload hashes verified for both architectures. These are software results.
+
+A separate read-only check on the real x86_64 SDK emulator confirms APM method
+signatures, installed ID/version, pending-state output and ordinary-user active
+file hashing, without changing/launching/stopping an existing application.
+Physical ARM64 SDK/sandbox acceptance remains open; KVADRA is currently
+unreachable through both connections. Linux and both ARM editor builds pass;
+both ARM release templates also build and pass native fork/exec/exit/fence SDK
+smoke. Final clean-source
 artifact provenance is still a separate point-13 gate. Architecture and reproduction:
 [REMOTE_SESSION.md](REMOTE_SESSION.md), [deploy_recovery_smoke/README.md](deploy_recovery_smoke/README.md).
 
@@ -64,7 +90,7 @@ belongs to the active modal export window. SDK progress selects the GUI directly
 instead of relying on EditorNode's startup command-line flag, which can be set
 before a Wayland window first becomes drawable. Original Linux code is unchanged.
 
-Validation: **29 Python cases** pass, including packaging/build regressions;
+Validation: **38 Python cases** pass, including packaging/build and native-session regressions;
 the real SDK smoke checks exact exit/Unicode, secret suppression, SIGTERM-ignoring
 child cancellation, an unaffected unrelated SDK job, client EOF/lease loss and
 SIGHUP/SIGTERM cleanup of the owned child.
@@ -79,14 +105,16 @@ Failures/cancellation preserve the previous output; temporary staging is cleaned
 the ignoring child is no longer running. Final host RPM bytes independently dump
 the public SDK Regular development signature. No root-CA verification is claimed.
 The GUI screenshot confirms masking, and logs/presets/settings contain no test
-passphrase. Linux and both ARM editor builds pass; the 8-case / 111-assertion
-Aurora C++ regression also passes. ARM compilation does not establish hardware
+passphrase. Correct/wrong headless passwords were rechecked after separate SDK
+stdout/stderr capture was added, without leaking the synthetic passphrase.
+Linux and both ARM editor builds pass; the expanded Aurora C++ regression is
+recorded above. ARM compilation does not establish hardware
 acceptance of the desktop export UI.
 
 This closes protected-key input and in-command SDK-engine cancellation. A local
 `deploy`/`device exec` cancellation stops the local sfdk transport. Launch-session
-recovery is now integrated above; installation outcome reconciliation remains
-pending. Windows/macOS export hosts are still disabled. Reproduction:
+and installation-outcome recovery are now integrated above; physical ARM64
+acceptance remains pending. Windows/macOS export hosts are still disabled. Reproduction:
 [signing_smoke/README.md](signing_smoke/README.md).
 
 ## Deferred documentation work after editor shutdown
@@ -406,7 +434,7 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
   require confirming the SDK dialog on the device.
 - Protected-key signing and SDK-engine cancellation are now verified above.
   Launch-session recovery now passes the software fixture. Still pending:
-  installation outcome reconciliation, new-path normal launcher/sandbox acceptance,
+  physical installation recovery, new-path normal launcher/sandbox acceptance,
   ARM32 hardware, and native GDB. This is a developer launch through SDK.
 - Setup and limits: [EXPORT.md](EXPORT.md); opt-in integration fixture:
   [deploy_smoke/README.md](deploy_smoke/README.md).
@@ -473,8 +501,8 @@ libxkbcommon is bundled with its license because it is not Regular public API.
   and keyboard avoidance; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
-- Installation outcome reconciliation after cancellation/connection loss and
-  physical acceptance of the new launch-session controller;
+- Physical ARM64 acceptance of installation recovery after cancellation/connection
+  loss and of the new launch-session controller;
   Windows/macOS host packaging and Aurora execution of nested RPM layouts.
 - PSDK and BT build validation, Vulkan hardware presentation, ARM32 occlusion
   backend, broader Embree performance/editor checks, Aurora hot-reload acceptance.

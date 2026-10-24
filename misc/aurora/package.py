@@ -169,6 +169,19 @@ def append_pck(executable, pck, expected_sha256=None):
             destination.write(struct.pack("<Q4s", size, b"GDPC"))
 
 
+def runtime_receipt(stage, files, name, version, release, arch):
+    """Identify the packaged native runtime, after RPATH edits/strip/PCK append."""
+    hashes = {}
+    for path in files:
+        installed = "/" + path.relative_to(stage).as_posix()
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        hashes[installed] = digest.hexdigest()
+    return {"schema": 1, "package": name, "version": version, "release": release, "arch": arch, "files": hashes}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
@@ -176,6 +189,9 @@ def main():
     source.add_argument("--project", type=Path, help="Unpacked development project (editor binary only)")
     source.add_argument("--pck", type=Path, help="Embed a game PCK without enabling path overrides")
     parser.add_argument("--pck-sha256", help="PCK SHA256 calculated on the export host; detects stale SDK reads")
+    parser.add_argument(
+        "--receipt", type=Path, help="Write the exported native-runtime identity for SDK deploy recovery"
+    )
     parser.add_argument("--strip", default="strip", help="Target strip executable for embedded-PCK packages")
     parser.add_argument("--native-dir", type=Path)
     parser.add_argument("--native-map", type=Path, help="Export host's resource-path/source/target map (schema 1)")
@@ -196,6 +212,8 @@ def main():
     parser.add_argument("--release", default="1")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.receipt and not args.pck:
+        parser.error("--receipt requires an embedded PCK with stripping disabled after packaging")
     if args.pck_sha256 is not None and (not args.pck or not re.fullmatch(r"[0-9a-fA-F]{64}", args.pck_sha256)):
         parser.error("--pck-sha256 requires --pck and a 64-digit hexadecimal digest")
     for value in (args.name, args.version, args.release):
@@ -291,6 +309,12 @@ def main():
             installed = stage / datadir / destinations[path]
             installed_manifest["files"][str(destinations[path])] = elf_info(installed)
         (data / "native-manifest.json").write_text(json.dumps(installed_manifest, indent=2) + "\n")
+        receipt = None
+        if args.pck:
+            runtime_files = [launcher, data / "native-manifest.json"]
+            runtime_files += [stage / datadir / destinations[path] for path in private_files]
+            receipt = runtime_receipt(stage, runtime_files, args.name, args.version, args.release, args.arch)
+            (data / "runtime-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         if args.probe:
             libexec = stage / "usr/libexec" / args.name
             libexec.mkdir(parents=True)
@@ -393,6 +417,10 @@ cp -a {stage_shell} "%{{buildroot}}/"
             ],
             check=True,
         )
+        if args.receipt:
+            # Publish only after rpmbuild succeeds. The embedded-PCK policy has
+            # already disabled RPM's later ELF stripping/debug extraction.
+            args.receipt.write_text(json.dumps(receipt) + "\n")
     print(output / rpm_arch / "{}-{}-{}.{}.rpm".format(args.name, args.version, args.release, rpm_arch))
 
 

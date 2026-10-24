@@ -30,6 +30,7 @@
 
 #include "export_plugin.h"
 
+#include "apm_reconcile.h"
 #include "logo_svg.gen.h"
 #include "remote_deploy_state.h"
 #include "resources.gen.h"
@@ -166,7 +167,7 @@ Error EditorExportPlatformAuroraOS::export_project(const Ref<EditorExportPreset>
 	return export_project_internal(p_preset, p_debug, p_path, p_flags, p_notify, p_preset->get("package/release"));
 }
 
-Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release) {
+Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release, Dictionary *r_receipt) {
 	ExportNotifier notifier(*this, p_preset, p_debug, p_path, p_flags, p_notify);
 	String configuration_error;
 	bool missing_templates = false;
@@ -279,6 +280,10 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 	native_map_file->store_string(JSON::stringify(native_map));
 	native_map_file.unref();
 	option("--native-map", native_map_path);
+	String receipt_path = stage_path.path_join("export-receipt.json");
+	if (r_receipt) {
+		option("--receipt", receipt_path);
+	}
 	String output;
 	int exit_code = -1;
 	error = AuroraSDK::execute(p_preset->get("sdk/sfdk"), arguments, "Packaging Aurora RPM", &output, &exit_code);
@@ -288,6 +293,18 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 	if (error != OK || exit_code != 0) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora RPM", "SDK packaging failed. Templates and output directory must be visible in the SDK shared workspace.\n" + output);
 		return error != OK ? error : ERR_CANT_CREATE;
+	}
+	if (r_receipt) {
+		JSON receipt;
+		if (receipt.parse(FileAccess::get_file_as_string(receipt_path)) != OK || receipt.get_data().get_type() != Variant::DICTIONARY || !AuroraAPM::valid_receipt(receipt.get_data(), name)) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora receipt", "SDK did not produce a valid native-runtime receipt.");
+			return ERR_INVALID_DATA;
+		}
+		Dictionary value = receipt.get_data();
+		if (String(value["version"]) != version || String(value["release"]) != release || String(value["arch"]) != arch) {
+			return ERR_INVALID_DATA;
+		}
+		*r_receipt = value;
 	}
 	String rpm = stage_path.path_join("rpms").path_join(rpm_arch).path_join(name + "-" + version + "-" + release + "." + rpm_arch + ".rpm");
 	List<String> validation_arguments;
@@ -414,12 +431,193 @@ Error EditorExportPlatformAuroraOS::remote_action(const String &p_action, Dictio
 	String output;
 	Error error = sdk_command(remote_session["sfdk"], arguments, "Aurora " + p_action, &output);
 	if (error != OK) {
-		add_message(EXPORT_MESSAGE_WARNING, "Aurora session", "Remote operation was not confirmed. Its session record is retained. Reconnect and use Stop Aurora project before replacing the launch.");
+		add_message(EXPORT_MESSAGE_WARNING, "Aurora session", "Remote operation was not confirmed. Its session record is retained. Reconnect and retry Run to recover this operation, or use Stop Aurora project.");
 		return error;
 	}
 	error = AuroraDeploy::parse_status(output, remote_session["token"], r_status);
 	if (error != OK) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora session", "SDK returned an invalid session response. The operation record is retained for recovery.");
+	}
+	return error;
+}
+
+Error EditorExportPlatformAuroraOS::device_query(const List<String> &p_command, const String &p_stage, String &r_stdout, String &r_stderr, int &r_exit) {
+	List<String> args{ "device", "exec", remote_session["device"], "--" };
+	for (const String &argument : p_command) {
+		args.push_back(argument);
+	}
+	String diagnostic;
+	return AuroraSDK::execute(remote_session["sfdk"], args, p_stage, &diagnostic, &r_exit, Dictionary(), &r_stdout, &r_stderr);
+}
+
+Error EditorExportPlatformAuroraOS::verify_installation() {
+	if (!remote_session.has("receipt")) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora installation", "This older session has no exported-runtime receipt. Keep its RPM and use Stop before starting a fresh deployment.");
+		return ERR_UNAVAILABLE;
+	}
+	if (bool(remote_session.get("runtime_verified", false))) {
+		// A missing launch may be retried after files/registration changed. The
+		// previous snapshot must not let Stop discard an RPM after a failed
+		// recheck. Keep the same token to fence any delayed launch request.
+		Dictionary checking = remote_session.duplicate(true);
+		checking["phase"] = "ready";
+		checking["runtime_verified"] = false;
+		Error error = save_session(checking);
+		if (error != OK) {
+			return error;
+		}
+	}
+	Dictionary receipt = remote_session["receipt"];
+	String package = remote_session["package"];
+	String expected_version = String(receipt["version"]) + "-" + String(receipt["release"]);
+	String output;
+	String errors;
+	int exit_code = -1;
+	Error error = device_query({ "gdbus", "call", "--system", "--dest", "ru.omp.APM", "--object-path", "/ru/omp/APM", "--method", "ru.omp.APM.GetPackage", package }, "Checking Aurora package registration", output, errors, exit_code);
+	if (error != OK) {
+		return error;
+	}
+	bool available = exit_code == 0;
+	if (!available) {
+		if (exit_code == 1 && errors.contains("ru.omp.APM.Error.PackageNotExist")) {
+			add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "APM has not registered the requested package. The RPM and operation record are retained; retry Run after installation finishes.");
+			return ERR_BUSY;
+		}
+		bool unsupported = errors.contains("org.freedesktop.DBus.Error.UnknownMethod") || errors.contains("org.freedesktop.DBus.Error.ServiceUnknown") || errors.contains("org.freedesktop.DBus.Error.UnknownObject") || errors.contains("org.freedesktop.DBus.Error.AccessDenied");
+		if (!unsupported || bool(remote_session["install_unconfirmed"])) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora installation", "Could not verify APM registration. No installation is replayed and the saved package is retained.\n" + errors);
+			return unsupported ? ERR_UNAVAILABLE : ERR_CONNECTION_ERROR;
+		}
+		// Older devices may lack this read API. A successful SDK installation
+		// remains usable, but still requires exact active-file verification below.
+	} else {
+		Dictionary fields;
+		if (AuroraAPM::parse_package(output, fields) != OK) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora installation", "APM returned an invalid package response. The operation remains unconfirmed.");
+			return ERR_INVALID_DATA;
+		}
+		if (String(fields["general.id"]) != package || String(fields["general.version"]) != expected_version) {
+			add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "APM does not yet report the exported package version " + expected_version + ". No second installation or game launch was submitted.");
+			return ERR_BUSY;
+		}
+		error = device_query({ "gdbus", "call", "--system", "--dest", "ru.omp.APM", "--object-path", "/ru/omp/APM", "--method", "ru.omp.APM.CheckPackageHasPendingUpgrade", package }, "Checking Aurora pending update", output, errors, exit_code);
+		if (error != OK) {
+			return error;
+		}
+		if (exit_code == 0) {
+			bool pending = false;
+			if (AuroraAPM::parse_pending(output, pending) != OK) {
+				return ERR_INVALID_DATA;
+			}
+			if (pending) {
+				add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "APM still has a pending update for this application. Close its other running instances and retry Run; the exported RPM is retained.");
+				return ERR_BUSY;
+			}
+		} else if (!errors.contains("org.freedesktop.DBus.Error.UnknownMethod")) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora installation", "Could not read the pending-update state. The operation record is retained.\n" + errors);
+			return ERR_CONNECTION_ERROR;
+		}
+	}
+	Dictionary files = receipt["files"];
+	List<String> command{ "sha256sum", "--" };
+	Dictionary batch;
+	int bytes = 0;
+	auto verify_batch = [&]() -> Error {
+		Error result = device_query(command, "Verifying installed Aurora runtime", output, errors, exit_code);
+		if (result != OK) {
+			return result;
+		}
+		if (exit_code != 0) {
+			return ERR_BUSY;
+		}
+		return AuroraAPM::check_hashes(output, batch);
+	};
+	for (const Variant &key : files.get_key_list()) {
+		String path = key;
+		if (!batch.is_empty() && (batch.size() >= 48 || bytes + path.utf8().length() > 24000)) {
+			error = verify_batch();
+			if (error != OK) {
+				break;
+			}
+			command = { "sha256sum", "--" };
+			batch.clear();
+			bytes = 0;
+		}
+		command.push_back(path);
+		batch[path] = files[path];
+		bytes += path.utf8().length() + 1;
+	}
+	if (error == OK && !batch.is_empty()) {
+		error = verify_batch();
+	}
+	if (error != OK) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora runtime", "Active application files do not yet match the exported runtime receipt, or could not be read. No new launch was submitted; keep the package and retry Run after activation.\n" + errors);
+		return error;
+	}
+	Dictionary verified = remote_session.duplicate(true);
+	verified["phase"] = "ready";
+	verified["install_unconfirmed"] = false;
+	verified["runtime_verified"] = true;
+	return save_session(verified);
+}
+
+void EditorExportPlatformAuroraOS::cleanup_confirmed_staging() {
+	// A loaded journal must never authorize recursively deleting an arbitrary
+	// directory. Remove only our named RPM/owner marker in a marked stage.
+	if (bool(remote_session.get("install_unconfirmed", true)) || !bool(remote_session.get("runtime_verified", false))) {
+		return;
+	}
+	String stage = remote_session.get("staging", "");
+	String base = ProjectSettings::get_singleton()->globalize_path("res://.godot/aurora-deploy");
+	String rpm = remote_session.get("rpm", "");
+	if (stage.simplify_path() != stage || stage.get_base_dir() != base || rpm != rpm.validate_filename()) {
+		return;
+	}
+	PackedStringArray parts = stage.get_file().split("-");
+	if (parts.size() != 2 || !parts[0].is_valid_int() || !parts[1].is_valid_int()) {
+		return;
+	}
+	Ref<DirAccess> parent = DirAccess::open(base);
+	if (parent.is_null() || parent->is_link(stage.get_file()) || !FileAccess::exists(stage.path_join(".owner")) || FileAccess::get_file_as_string(stage.path_join(".owner")) != String(remote_session["token"])) {
+		return;
+	}
+	if (FileAccess::exists(stage.path_join(rpm)) && DirAccess::remove_absolute(stage.path_join(rpm)) != OK) {
+		return;
+	}
+	DirAccess::remove_absolute(stage.path_join(".owner"));
+	DirAccess::remove_absolute(stage); // Leaves unknown files/subdirectories intact.
+}
+
+Error EditorExportPlatformAuroraOS::launch_saved() {
+	Error error = verify_installation();
+	if (error != OK) {
+		return error;
+	}
+	Dictionary record = remote_session.duplicate(true);
+	record["phase"] = "launching";
+	error = save_session(record);
+	if (error != OK) {
+		return error;
+	}
+	List<String> launch_arguments;
+	for (const Variant &argument : Array(record["launch_args"])) {
+		launch_arguments.push_back(argument);
+	}
+	Dictionary status;
+	error = remote_action("launch", status, launch_arguments);
+	if (error != OK) {
+		return error;
+	}
+	if (String(status["state"]) != "running") {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora launch", "Game startup is not confirmed (" + String(status["state"]) + "). The saved session remains available for Run recovery or Stop.");
+		return ERR_BUSY;
+	}
+	record["phase"] = "running";
+	record["status"] = status;
+	error = save_session(record);
+	if (error == OK) {
+		cleanup_confirmed_staging();
+		add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Started verified runtime PID " + String(status["pid"]) + " on " + String(record["device"]) + ". Log: ~/.cache/godot-aurora/" + String(record["token"]) + ".log");
 	}
 	return error;
 }
@@ -468,13 +666,15 @@ Error EditorExportPlatformAuroraOS::stop_remote() {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora stop", "Process cleanup is not confirmed (" + state + "). The saved session remains available for another Stop attempt.");
 		return ERR_BUSY;
 	}
-	if (bool(remote_session.get("install_unconfirmed", false))) {
+	if (bool(remote_session.get("install_unconfirmed", false)) || (remote_session.has("receipt") && !bool(remote_session.get("runtime_verified", false)))) {
 		String archive = session_path.get_base_dir().path_join("aurora-install-uncertain-" + String(remote_session["token"]) + ".json");
 		error = AuroraDeploy::save_record(archive, remote_session);
 		if (error != OK) {
 			return error;
 		}
-		add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "Game launch is cancelled. SDK installation outcome is still unconfirmed; its package and operation record are retained at " + archive + ". Stop does not roll back an installation.");
+		add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "Game launch is cancelled. Installation or runtime activation is not fully verified; its package and record are retained at " + archive + ". Stop does not roll back an installation.");
+	} else {
+		cleanup_confirmed_staging();
 	}
 	error = DirAccess::remove_absolute(session_path);
 	if (error == OK) {
@@ -494,9 +694,8 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 		return error;
 	}
 	if (!remote_session.is_empty() && String(remote_session["phase"]) != "running") {
-		if (bool(remote_session.get("install_unconfirmed", false))) {
-			add_message(EXPORT_MESSAGE_ERROR, "Aurora installation", "The previous SDK installation was not confirmed. Use Stop Aurora project to fence its pending launch before retrying; the installation itself may still be in progress.");
-			return ERR_BUSY;
+		if (String(remote_session["phase"]) == "installing" || String(remote_session["phase"]) == "ready") {
+			return launch_saved(); // Read/verify the existing attempt; never replay deploy.
 		}
 		if (String(remote_session["phase"]) == "launching") {
 			Dictionary status;
@@ -512,7 +711,16 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 				if (error == OK) {
 					add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Recovered the existing launch on " + String(remote_session["device"]) + "; no second installation or game was submitted.");
 				}
+				if (error == OK) {
+					cleanup_confirmed_staging();
+				}
 				return error;
+			}
+			if (String(status["state"]) == "missing" && remote_session.has("receipt")) {
+				return launch_saved();
+			}
+			if (String(status["state"]) == "preparing") {
+				return ERR_BUSY;
 			}
 		}
 		// Even a missing reply must be fenced: its request could arrive later.
@@ -557,7 +765,8 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 	if (progress.step("Exporting and signing RPM", 0)) {
 		return ERR_SKIP;
 	}
-	error = export_project_internal(p_preset, true, rpm, 0, true, deploy_release);
+	Dictionary receipt;
+	error = export_project_internal(p_preset, true, rpm, 0, true, deploy_release, &receipt);
 	if (error != OK) {
 		return error;
 	}
@@ -579,7 +788,7 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 	}
 	ERR_FAIL_COND_V(error != OK, error);
 	Dictionary record;
-	record["schema"] = 1;
+	record["schema"] = 2;
 	record["token"] = String::hex_encode_buffer(bytes, sizeof(bytes));
 	record["sfdk"] = sfdk;
 	record["device"] = device;
@@ -588,44 +797,37 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 	record["staging"] = stage;
 	record["phase"] = "installing";
 	record["install_unconfirmed"] = true;
+	record["runtime_verified"] = false;
+	record["receipt"] = receipt;
+	Array launch_arguments;
+	launch_arguments.push_back("/usr/bin/" + String(p_preset->get("package/unique_name")));
+	for (const String &argument : gen_export_flags(p_debug_flags)) {
+		launch_arguments.push_back(argument);
+	}
+	record["launch_args"] = launch_arguments;
+	error = write_text(stage.path_join(".owner"), String(record["token"]).utf8().get_data());
+	if (error != OK) {
+		return error;
+	}
 	error = save_session(record);
 	if (error != OK) {
 		return error;
 	}
+	staging.preserve = true;
 	error = sdk_command(sfdk, { "-c", "device=" + device, "deploy", "--sdk", "--keepUserData", "--", rpm }, "Aurora installation");
 	if (error != OK) {
 		staging.preserve = true;
 		add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "Installation was not confirmed. The signed RPM is retained at " + rpm + "; no game launch was submitted.");
 		return error;
 	}
-	record["phase"] = "launching";
+	record["phase"] = "ready";
 	record["install_unconfirmed"] = false;
 	error = save_session(record);
 	if (error != OK) {
-		staging.preserve = true;
 		return error;
 	}
-	if (progress.step("Launching debug project", 3)) {
+	if (progress.step("Verifying and launching debug project", 3)) {
 		return ERR_SKIP;
 	}
-	List<String> launch_arguments{ "/usr/bin/" + String(p_preset->get("package/unique_name")) };
-	for (const String &argument : gen_export_flags(p_debug_flags)) {
-		launch_arguments.push_back(argument);
-	}
-	Dictionary status;
-	error = remote_action("launch", status, launch_arguments);
-	if (error != OK) {
-		return error;
-	}
-	if (String(status["state"]) != "running") {
-		add_message(EXPORT_MESSAGE_ERROR, "Aurora launch", "Game startup is not confirmed (" + String(status["state"]) + "). Its saved session remains available for Run recovery or Stop.");
-		return ERR_BUSY;
-	}
-	record["phase"] = "running";
-	record["status"] = status;
-	error = save_session(record);
-	if (error == OK) {
-		add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Started PID " + String(status["pid"]) + " on " + device + ". Log: ~/.cache/godot-aurora/" + String(record["token"]) + ".log");
-	}
-	return error;
+	return launch_saved();
 }

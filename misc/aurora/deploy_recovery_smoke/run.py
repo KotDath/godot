@@ -19,10 +19,26 @@ parser.add_argument("--editor", type=Path, required=True)
 parser.add_argument("--sfdk", type=Path, required=True)
 parser.add_argument("--project", type=Path, required=True)
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--arch", choices=("arm32", "arm64"), default="arm64")
 parser.add_argument(
     "--cases",
     nargs="+",
-    default=["recover_run", "restore_stop", "install_loss", "gate", "late_launch", "journal_block"],
+    default=[
+        "recover_run",
+        "restore_stop",
+        "install_loss",
+        "gate",
+        "late_launch",
+        "journal_block",
+        "install_recover",
+        "runtime_stale",
+        "pending_upgrade",
+        "api_unknown",
+        "no_api_confirmed",
+        "missing_recover",
+        "version_mismatch",
+        "missing_stale",
+    ],
 )
 args = parser.parse_args()
 if args.output.exists():
@@ -65,7 +81,14 @@ for case_name in args.cases:
         shutil.copy2(Path(__file__).with_name(name), addon / name)
     with (project / "project.godot").open("a") as config:
         config.write('\n[editor_plugins]\nenabled=PackedStringArray("res://addons/aurora_recovery_smoke/plugin.cfg")\n')
-    presets = (project / "export_presets.cfg").read_text().split("[preset.1]")[0]
+    blocks = re.split(r"(?m)(?=^\[preset\.[0-9]+\]$)", (project / "export_presets.cfg").read_text())
+    matching = [
+        block for block in blocks if re.search(r'^binary_format/architecture="' + args.arch + '"$', block, re.MULTILINE)
+    ]
+    assert len(matching) == 1, "Prepare exactly one Aurora preset for the selected architecture"
+    presets = re.sub(
+        r"(?m)^\[preset\.[0-9]+(\.options)?\]$", lambda match: "[preset.0" + (match[1] or "") + "]", matching[0]
+    )
     presets = re.sub(r"^sdk/sfdk=.*$", 'sdk/sfdk="' + str(fake) + '"', presets, flags=re.MULTILINE)
     presets += "\nremote_deploy/enabled=true\nsigning/enabled=true\n"
     if case_name == "gate":
@@ -100,26 +123,51 @@ for case_name in args.cases:
         "AURORA_FAKE_DRIVER": str(driver),
         "AURORA_FAKE_DEVICE_HOME": str(device_home),
         "AURORA_FAKE_APP_MARKER": str(app_marker),
-        "AURORA_FAKE_FAILURE": "launch"
-        if case_name == "recover_run"
-        else "late"
-        if case_name == "late_launch"
-        else "install"
-        if case_name == "install_loss"
-        else "none",
+        "AURORA_FAKE_JOURNAL": str(project / ".godot/editor/aurora-remote-session.json"),
+        "AURORA_FAKE_MACHINE": "armv7l" if args.arch == "arm32" else "aarch64",
+        "AURORA_FAKE_FAILURE": {
+            "recover_run": "launch",
+            "late_launch": "late",
+            "install_loss": "install",
+            "install_recover": "install_committed",
+            "runtime_stale": "stale",
+            "pending_upgrade": "pending",
+            "api_unknown": "api_unknown",
+            "no_api_confirmed": "api_unknown_confirmed",
+            "missing_recover": "before_dispatch",
+            "version_mismatch": "version",
+            "missing_stale": "before_dispatch",
+        }.get(case_name, "none"),
     }
-    modes = (
-        ["launch_loss", "recover_run"]
-        if case_name == "recover_run"
-        else ["launch_loss", "restore_stop"]
-        if case_name == "late_launch"
-        else ["success", "restore_stop"]
-        if case_name == "restore_stop"
-        else [case_name]
-    )
+    modes = {
+        "recover_run": ["launch_loss", "recover_run"],
+        "late_launch": ["launch_loss", "restore_stop"],
+        "restore_stop": ["success", "restore_stop"],
+        "install_recover": ["install_pending", "install_recover"],
+        "runtime_stale": ["activation_pending", "activation_recover"],
+        "pending_upgrade": ["activation_pending", "activation_recover"],
+        "api_unknown": ["install_loss"],
+        "no_api_confirmed": ["success_stop"],
+        "missing_recover": ["launch_loss", "recover_run"],
+        "version_mismatch": ["activation_pending", "activation_recover"],
+        "missing_stale": ["launch_loss", "activation_loss"],
+    }.get(case_name, [case_name])
     evidence = []
     try:
         for index, mode in enumerate(modes):
+            if index == 1 and case_name == "missing_stale":
+                saved = json.loads((project / ".godot/editor/aurora-remote-session.json").read_text())
+                library = next(name for name in saved["receipt"]["files"] if "/lib/" in name and name.endswith(".so"))
+                (device_home / "active-runtime" / library.lstrip("/")).write_bytes(
+                    b"runtime changed after the first check"
+                )
+            if index == 1 and case_name in ("runtime_stale", "pending_upgrade", "version_mismatch"):
+                shutil.copytree(device_home / "staged-runtime", device_home / "active-runtime", dirs_exist_ok=True)
+                installed = json.loads((device_home / "installed.json").read_text())
+                installed["pending"] = False
+                saved = json.loads((project / ".godot/editor/aurora-remote-session.json").read_text())
+                installed["version"] = saved["receipt"]["version"] + "-" + saved["receipt"]["release"]
+                (device_home / "installed.json").write_text(json.dumps(installed))
             result_path = case / f"{index}-{mode}.json"
             with (case / f"{index}-{mode}.log").open("w") as log:
                 result = subprocess.run(
@@ -133,6 +181,15 @@ for case_name in args.cases:
             value = json.loads(result_path.read_text())
             assert value["matched"], value
             evidence.append(value)
+            if mode in ("install_pending", "activation_pending"):
+                saved = value["journal"]
+                assert not app_marker.exists()
+                assert (Path(saved["staging"]) / saved["rpm"]).is_file()
+                before = [json.loads(line)["kind"] for line in events.read_text().splitlines()]
+                if case_name in ("pending_upgrade", "version_mismatch"):
+                    assert "hash" not in before, before
+                elif case_name == "runtime_stale":
+                    assert "hash" in before, before
         operations = [json.loads(line)["kind"] for line in events.read_text().splitlines()] if events.exists() else []
         if case_name == "gate":
             assert not operations, operations
@@ -146,18 +203,42 @@ for case_name in args.cases:
             blocked.rmdir()
         else:
             assert operations.count("deploy") == 1, operations
-            if case_name in ("recover_run", "restore_stop"):
-                assert operations.count("launch") == 1 and operations.count("stop") == 1, operations
+            assert operations.count("payload_verified") == 1, operations
+            if case_name in (
+                "recover_run",
+                "restore_stop",
+                "install_recover",
+                "runtime_stale",
+                "pending_upgrade",
+                "no_api_confirmed",
+                "missing_recover",
+                "version_mismatch",
+            ):
+                expected_launch_requests = 2 if case_name == "missing_recover" else 1
+                assert operations.count("launch") == expected_launch_requests and operations.count("stop") == 1, (
+                    operations
+                )
                 if case_name == "recover_run":
                     assert operations.count("status") == 1
-                assert evidence[-1]["restored_stop"]
+                if case_name != "no_api_confirmed":
+                    assert evidence[-1]["restored_stop"]
                 assert len(app_marker.read_text().splitlines()) == 1
                 assert not running(int(app_marker.read_text()))
-            if case_name == "install_loss":
-                assert "launch" not in operations and not app_marker.exists()
+                if len(evidence) >= 2:
+                    assert not Path(evidence[0]["journal"]["staging"]).exists(), (
+                        "Confirmed owned staging was not cleaned"
+                    )
+            if case_name in ("install_loss", "api_unknown", "missing_stale"):
+                assert not app_marker.exists()
+                if case_name == "missing_stale":
+                    assert operations.count("launch") == 1 and operations.count("stop") == 1
+                else:
+                    assert "launch" not in operations
                 archives = list((project / ".godot/editor").glob("aurora-install-uncertain-*.json"))
                 assert len(archives) == 1
                 saved = json.loads(archives[0].read_text())
+                if case_name == "missing_stale":
+                    assert saved["runtime_verified"] is False and saved["install_unconfirmed"] is False
                 rpm = Path(saved["staging"]) / saved["rpm"]
                 assert rpm.is_file() and rpm.stat().st_size > 1024
             if case_name == "late_launch":
@@ -175,7 +256,13 @@ for case_name in args.cases:
                     and operations.count("stop") == 1
                 )
         assert not (project / ".godot/editor/aurora-remote-session.json").exists()
-        summary.append({"case": case_name, "evidence": evidence, "operations": operations, "hardware": False})
+        summary.append({
+            "case": case_name,
+            "arch": args.arch,
+            "evidence": evidence,
+            "operations": operations,
+            "hardware": False,
+        })
         print("PASS:", case_name, flush=True)
     finally:
         # Only fixture token directories are touched, including a failed test.

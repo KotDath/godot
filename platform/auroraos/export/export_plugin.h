@@ -44,9 +44,13 @@ class EditorExportPlatformAuroraOS : public EditorExportPlatform {
 	Error load_session();
 	Error save_session(const Dictionary &p_record);
 	Error remote_action(const String &p_action, Dictionary &r_status, const List<String> &p_launch_arguments = List<String>());
+	Error device_query(const List<String> &p_command, const String &p_stage, String &r_stdout, String &r_stderr, int &r_exit);
+	Error verify_installation();
+	Error launch_saved();
+	void cleanup_confirmed_staging();
 	Error sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output = nullptr, const Dictionary &p_secret_environment = Dictionary());
 	Error stop_remote();
-	Error export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release);
+	Error export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release, Dictionary *r_receipt = nullptr);
 	String template_path(const Ref<EditorExportPreset> &p_preset, bool p_debug) const;
 
 public:
