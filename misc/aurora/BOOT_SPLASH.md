@@ -72,3 +72,17 @@ This is a real GPU component test of the layout/shader combination. It is not a
 capture of Godot's actual boot sequence, a Wayland protocol/compositor check, or
 physical ARM acceptance. Engine builds and the ordinary Linux Wayland regression
 are recorded separately in STATUS.md.
+
+## Engine validation
+
+Source commit `ac904bd2ee` passes incremental Linux editor and six ARM engine
+builds (editor/debug/release for both ARM architectures). Each exact ELF has its
+expected architecture/ABI and embeds the full source revision. Before each ARM
+architecture's compilation, the SDK stat sizes and SHA256 of orientation.h and
+rasterizer_gles3.cpp match the host. The tracked source snapshot remains identical
+before/after the complete run. Linux passes the 15 Aurora C++ cases / 195 assertions
+and a private KWin Wayland/OpenGL 3D/native42 regression with real frame capture.
+Local artifacts/manifest: `.aurora-tools/boot-splash-engine-ac904bd2/`.
+
+These are incremental developer-checkout checks; the detached clean-source matrix
+at `6573da29ad` is separate. Neither is a physical Aurora splash/startup result.

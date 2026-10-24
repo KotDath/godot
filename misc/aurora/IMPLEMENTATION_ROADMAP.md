@@ -272,8 +272,11 @@ transform, фокус, surface по каждому окну/output. Отслеж
 native framebuffer viewport и поворот существующим copy shader из одного снимка.
 Реальный GPU component test на AMD/radeonsi и llvmpipe проходит по 147 случаев
 и 30133826 interior-pixel сравнений; boundary differences также равны нулю.
-Контроли неверного поворота/viewport отвергаются. Сборки движка и приёмка startup
-на Авроре ещё требуются; это не доказательство поддержки нескольких окон/экранов.
+Контроли неверного поворота/viewport отвергаются. Incremental-проверка commit
+`ac904bd2ee`: Linux editor, все шесть ARM-артефактов, ELF/ревизия, 15 C++ cases /
+195 assertions и обычный Linux Wayland/3D/native42 проходят. Это отдельный прогон
+от clean-source CI; приёмка startup на Авроре ещё требуется. Несколько окон и
+экранов этим не подтверждены.
 Контракт: [BOOT_SPLASH.md](BOOT_SPLASH.md).
 
 ## 10. XR

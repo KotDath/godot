@@ -66,10 +66,19 @@ AMD Radeon 8060S/radeonsi and llvmpipe each pass 30133826 interior comparisons a
 zero boundary differences. Missing-rotation and wrong-viewport controls both fail
 at transform 1. Exact evidence is in `.aurora-tools/boot-splash-evidence/`.
 
-Actual engine builds, ordinary Linux Wayland regression and real Aurora startup
-acceptance are still pending for this change. The GPU component test does not
-establish those results. Multiwindow, per-output/external displays and Vulkan
-orientation remain open. Reproduction: [BOOT_SPLASH.md](BOOT_SPLASH.md).
+Incremental engine validation of source commit `ac904bd2ee` passes: Linux editor,
+all six ARM32/ARM64 editor/debug/release binaries, expected ELF ABIs and full
+embedded revision. The SDK views of the two changed production files match their
+host sizes and SHA256 before compiling. Tracked source identity stays unchanged
+through the run. Linux also passes 15 Aurora C++ cases / 195 assertions and an
+actual private KWin/Wayland/OpenGL 3D/native42 run with a captured viewport frame.
+Exact artifacts, commands, hashes and results:
+`.aurora-tools/boot-splash-engine-ac904bd2/`.
+
+These are incremental developer builds, separate from the detached clean-source
+CI matrix at `6573da29ad`. Real Aurora startup remains unaccepted. Multiwindow,
+per-output/external displays and Vulkan orientation remain open. Reproduction:
+[BOOT_SPLASH.md](BOOT_SPLASH.md).
 
 ## Vulkan WSI diagnostic (point 6, software part)
 
