@@ -14,7 +14,9 @@ Engine commit `6573da29ad` adds a clean-worktree software matrix, a manifest/fil
 ELF verifier and a GitHub workflow. All 48 Python checks and actionlint pass.
 The first full local matrix has started in `../aurora-ci-6573da29/`; its clean
 Linux editor build, 48 Python checks and 15 Aurora C++ cases / 195 assertions pass.
-The complete matrix is **not yet accepted**: ARM builds, full bindings, package validation and final identity gates
+Clean ARM32 editor/debug builds and their source-revision checks also pass.
+The complete matrix is **not yet accepted**: remaining ARM builds, full bindings,
+package validation and final identity gates
 must all finish. No GitHub SDK job is counted as run. See [CI.md](CI.md).
 
 godot-cpp commit `690cda7` preserves debug information for the dependency example's
@@ -27,6 +29,27 @@ Reproduction: [debugger_smoke/README.md](debugger_smoke/README.md).
 
 KVADRA was rechecked through audb on both connections: Wi-Fi times out and USB
 has no route. No new physical acceptance result is claimed.
+
+## Audio server classification and interruption (point 5, software part)
+
+A standalone SDK x86_64 libpulse client runs on the Aurora emulator. The actual
+server assigns an absent role to `x-maemo`/`othermedia`; explicitly requesting
+`x-maemo` gives the same result, while `event` is preserved. No engine role
+override was added merely to copy savegame's setting.
+
+Actual monitor PCM verifies interruption: a 440 Hz `x-maemo` client overlapping an
+880 Hz notification drops from amplitude 4095.357 to 0.001800 and returns to
+4095.357 on the same stream. The `event` negative control retains its 440 Hz
+component throughout. Both captures have exactly 576000 stereo frames and verified
+stream/sink/monitor identities. Ordinary volume fields stay constant, so their
+inspection alone would not establish this result. The policy reroutes clients to
+the ordinary emulator output even when a private sink is requested; final sample
+checks use that output with only owned test playback streams.
+
+This is actual emulator server policy evidence, not Godot-driver, physical sound,
+headset, call/alarm acquisition or lifecycle acceptance. Reproduction and exact
+limits: [audio_smoke/README.md](audio_smoke/README.md). The user confirmed KVADRA
+is discharged and work should continue without it; physical checks remain open.
 
 ## Vulkan WSI diagnostic (point 6, software part)
 
