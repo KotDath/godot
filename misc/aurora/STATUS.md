@@ -8,6 +8,26 @@ Hardware inventory: `phone` (Wi-Fi, 192.168.2.44) and
 are USB/Wi-Fi connections to the **same KVADRA ARM64 tablet**. They do not count
 as two physical test devices. Real ARM32 hardware has not been supplied yet.
 
+## Clean-source CI and native symbol checks (software part)
+
+Engine commit `6573da29ad` adds a clean-worktree software matrix, a manifest/file/
+ELF verifier and a GitHub workflow. All 48 Python checks and actionlint pass.
+The first full local matrix has started in `../aurora-ci-6573da29/`; its clean
+Linux editor build, 48 Python checks and 15 Aurora C++ cases / 195 assertions pass.
+The complete matrix is **not yet accepted**: ARM builds, full bindings, package validation and final identity gates
+must all finish. No GitHub SDK job is counted as run. See [CI.md](CI.md).
+
+godot-cpp commit `690cda7` preserves debug information for the dependency example's
+middle/leaf DSOs as well as its extension. A real local x86_64 GDB run resolves a
+pending DSO breakpoint, verifies both source locations and DSO owners, steps from
+middle to leaf and returns 40 then 42. Stripped-middle and missing-leaf controls
+both fail as expected. This uses the existing `d9cee3bf8` host binary, not the
+fresh matrix build; remote Aurora/native engine-core debugging remains pending.
+Reproduction: [debugger_smoke/README.md](debugger_smoke/README.md).
+
+KVADRA was rechecked through audb on both connections: Wi-Fi times out and USB
+has no route. No new physical acceptance result is claimed.
+
 ## Vulkan WSI diagnostic (point 6, software part)
 
 Added a standalone probe creating a real Wayland surface/swapchain and checking

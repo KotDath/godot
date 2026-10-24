@@ -3,7 +3,8 @@
 The runtime debugger uses Godot's own TCP protocol. Neither the engine nor the
 export platform depends on audb. Installation/process launch may use SDK tools or
 another development workflow. Debug templates are required; C++ debugging with
-GDB is a separate, untested path.
+GDB is a separate path. The local source-symbol check below passes; remote GDB on
+Aurora remains unaccepted.
 
 ## Manual use
 
@@ -60,6 +61,38 @@ AURORA_DEBUG:continued
 The plugin requests the servers profiler, but this alone is not a verification
 of profiler contents. Stack-variable UI, Remote Scene Tree, live editing and
 native GDB sessions still require separate acceptance checks.
+
+## Local native GDB source-symbol check
+
+Build the godot-cpp dependency-chain example with `debug_symbols=yes` for all
+three libraries (see that example's README). From the engine checkout, run:
+
+```sh
+gdb -nx --batch -x misc/aurora/debugger_smoke/native.gdb --args \
+  /path/to/godot.linuxbsd.editor.x86_64 --headless --audio-driver Dummy \
+  --path /path/to/godot-cpp/examples/aurora_dependency_chain/project --quit-after 2
+```
+
+This starts its own headless process. A pending breakpoint resolves when the
+middle DSO is loaded. The check verifies its actual DSO owner and available
+`middle.cpp` source location, steps into the leaf DSO with its `leaf.cpp` location,
+and verifies native return values 40 and 42 before continuing to a normal exit.
+Success requires both `AURORA_GDB_NATIVE_PASS` and the runtime's
+`AURORA_GDEXTENSION_CHAIN_OK`. No download of debug symbols is enabled.
+
+On Linux x86_64 this passed with godot-cpp
+`690cda7d4eaf4470bd9b810aa9b77c958bb2c9ba` and the existing engine binary reporting
+`d9cee3bf8`. Two isolated negative controls also behaved correctly: stripping only
+the middle DSO's debug information fails the source-location check; removing the
+leaf DSO fails extension loading. Neither can print the final success marker.
+Exact binary/script hashes, commands and logs are retained locally in
+`.aurora-tools/native-gdb-source-controls/`.
+
+This checks the fixture's native source/step/return path on the host. It is not a
+fresh full-matrix result, an engine-core variable inspection test, or a remote
+Aurora GDB session. Remote acceptance additionally requires matching target
+libraries/sysroot, matching unstripped symbols, a compatible target debugger and
+an allowed debug-server launch/connection in the intended device security context.
 
 ## Recorded result — 2026-10-23
 
