@@ -6,6 +6,8 @@ The host Python/SCons are build tools, not target runtime dependencies.
 
 The clean-source software matrix and artifact verifier are described in
 [CI.md](CI.md). Physical device results remain separate in STATUS.md.
+Main-window GLES boot-image orientation and its GPU component check are described
+in [BOOT_SPLASH.md](BOOT_SPLASH.md).
 
 ## SDK bootstrap and compilation
 

@@ -500,9 +500,19 @@ void RasterizerGLES3::set_boot_image_with_stretch(const Ref<Image> &p_image, con
 	}
 
 	Size2i win_size = DisplayServer::get_singleton()->window_get_size();
+#ifdef AURORAOS_ENABLED
+	// Layout uses the logical window, while EGL still owns the native framebuffer.
+	// Read size and transform together, as for the ordinary frame presentation.
+	const auto presentation = AuroraOrientation::get_presentation(win_size);
+	win_size = presentation.get_logical_size();
+#endif
 
 	glBindFramebuffer(GL_FRAMEBUFFER, GLES3::TextureStorage::system_fbo);
+#ifdef AURORAOS_ENABLED
+	glViewport(0, 0, presentation.native_size.x, presentation.native_size.y);
+#else
 	glViewport(0, 0, win_size.width, win_size.height);
+#endif
 	glEnable(GL_BLEND);
 	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
 	glDepthMask(GL_FALSE);
@@ -531,7 +541,11 @@ void RasterizerGLES3::set_boot_image_with_stretch(const Ref<Image> &p_image, con
 	t->gl_set_filter(p_use_filter ? RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR : RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, t->tex_id);
+#ifdef AURORAOS_ENABLED
+	copy_effects->copy_to_rect(screenrect, false, presentation.transform);
+#else
 	copy_effects->copy_to_rect(screenrect);
+#endif
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	gl_end_frame(true);

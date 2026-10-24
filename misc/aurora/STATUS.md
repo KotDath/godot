@@ -51,6 +51,26 @@ headset, call/alarm acquisition or lifecycle acceptance. Reproduction and exact
 limits: [audio_smoke/README.md](audio_smoke/README.md). The user confirmed KVADRA
 is discharged and work should continue without it; physical checks remain open.
 
+## Main-window GLES boot-splash rotation (point 9, software part)
+
+The separate boot-image draw path now lays out in logical dimensions, uses the
+native EGL framebuffer dimensions and passes the content transform to the existing
+copy shader. It reads one atomic snapshot; an unavailable/invalid snapshot falls
+back to ordinary unrotated presentation. All changes in the common GLES boot
+function are guarded for Aurora, preserving the original Linux branches.
+
+A real surfaceless GLES component check uses the production presentation/stretch
+helpers and actual copy.glsl: 147 cases per driver, six stretch modes, all four
+transforms, three native sizes, both filters, alpha and asymmetric image content.
+AMD Radeon 8060S/radeonsi and llvmpipe each pass 30133826 interior comparisons and
+zero boundary differences. Missing-rotation and wrong-viewport controls both fail
+at transform 1. Exact evidence is in `.aurora-tools/boot-splash-evidence/`.
+
+Actual engine builds, ordinary Linux Wayland regression and real Aurora startup
+acceptance are still pending for this change. The GPU component test does not
+establish those results. Multiwindow, per-output/external displays and Vulkan
+orientation remain open. Reproduction: [BOOT_SPLASH.md](BOOT_SPLASH.md).
+
 ## Vulkan WSI diagnostic (point 6, software part)
 
 Added a standalone probe creating a real Wayland surface/swapchain and checking

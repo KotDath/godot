@@ -49,10 +49,21 @@ inline void set_presentation(Vector2i native_size, int transform) {
 struct Presentation {
 	Vector2i native_size;
 	int transform;
+
+	Vector2i get_logical_size() const {
+		return transform % 2 ? Vector2i(native_size.y, native_size.x) : native_size;
+	}
 };
 inline Presentation get_presentation() {
 	uint64_t state = presentation_state.load();
 	return { Vector2i(state & 0xffff, (state >> 16) & 0xffff), int((state >> 32) & 3) };
+}
+inline Presentation get_presentation(Vector2i p_fallback_size) {
+	const Presentation presentation = get_presentation();
+	if (presentation.native_size.x <= 0 || presentation.native_size.y <= 0) {
+		return { p_fallback_size, 0 };
+	}
+	return presentation;
 }
 
 inline Vector2 to_buffer(Vector2 p, Vector2 size, int transform, bool vector = false) {
