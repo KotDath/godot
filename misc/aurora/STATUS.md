@@ -3,6 +3,52 @@
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
+Hardware inventory: `phone` (192.168.2.44) and `usb-serial-phone` (192.168.3.5)
+are USB/Wi-Fi connections to the **same KVADRA ARM64 tablet**. They do not count
+as two physical test devices. Real ARM32 hardware has not been supplied yet.
+
+## Protected-key signing and cancellable SDK jobs (point 2)
+
+SDK commands now run in a worker while the editor pumps its progress UI. A
+small embedded Python supervisor runs inside the Linux SDK; the desktop editor
+does not need host Python. It owns the command's process group and terminates
+it on Cancel, stdin EOF, heartbeat expiry or transport SIGHUP/SIGTERM,
+escalating to SIGKILL for an uncooperative child. The group leader remains unreaped until the final group
+signal, preventing a reused process-group ID from being targeted.
+
+Encrypted PEM signing uses a masked modal LineEdit, or the ephemeral
+`GODOT_AURORA_KEY_PASSPHRASE` environment value for headless automation. The
+passphrase travels over stdin into the signing child's environment, never argv,
+presets or editor settings. Secret-command output is suppressed. The prompt
+belongs to the active modal export window. SDK progress selects the GUI directly
+instead of relying on EditorNode's startup command-line flag, which can be set
+before a Wayland window first becomes drawable. Original Linux code is unchanged.
+
+Validation: **29 Python cases** pass, including packaging/build regressions;
+the real SDK smoke checks exact exit/Unicode, secret suppression, SIGTERM-ignoring
+child cancellation, an unaffected unrelated SDK job, client EOF/lease loss and
+SIGHUP/SIGTERM cleanup of the owned child.
+It checks the outer interpreter/SDK exit as well as the inner command result.
+The SDK's Python 3.8 initially exposed a buffered-stdin daemon-thread shutdown
+abort; the final reader uses raw polling and is stopped/joined before exit.
+
+The actual export dialog passes all five acceptance scenarios: correct headless
+password, wrong password, GUI prompt cancellation, GUI confirmation and packaging
+cancellation followed by a successful retry **in the same editor process**.
+Failures/cancellation preserve the previous output; temporary staging is cleaned;
+the ignoring child is no longer running. Final host RPM bytes independently dump
+the public SDK Regular development signature. No root-CA verification is claimed.
+The GUI screenshot confirms masking, and logs/presets/settings contain no test
+passphrase. Linux and both ARM editor builds pass; the 8-case / 111-assertion
+Aurora C++ regression also passes. ARM compilation does not establish hardware
+acceptance of the desktop export UI.
+
+This closes protected-key input and in-command SDK-engine cancellation. A local
+`deploy`/`device exec` cancellation only stops the sfdk transport: resolving an
+already submitted device operation and recovering its PID after connection loss
+remain pending. Windows/macOS export hosts are still disabled. Reproduction:
+[signing_smoke/README.md](signing_smoke/README.md).
+
 ## Deferred documentation work after editor shutdown
 
 Added lifetime checks before loading/regenerating script documentation: queued
@@ -315,8 +361,8 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
 - Signature: SDK public Regular development certificate; no root-CA trust check.
   Regular validation has the existing non-Silica warning only. Installation may
   require confirming the SDK dialog on the device.
-- Still pending: interactive encrypted-key signing, cancellation while an SDK
-  command runs, connection-loss recovery, normal launcher/sandbox acceptance,
+- Protected-key signing and SDK-engine cancellation are now verified above.
+  Still pending: device operation connection-loss recovery, normal launcher/sandbox acceptance,
   ARM32 hardware, and native GDB. This is a developer launch through SDK.
 - Setup and limits: [EXPORT.md](EXPORT.md); opt-in integration fixture:
   [deploy_smoke/README.md](deploy_smoke/README.md).
@@ -383,7 +429,7 @@ libxkbcommon is bundled with its license because it is not Regular public API.
   and keyboard avoidance; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
-- Broader deployment recovery/cancellation and encrypted-key signing UI;
+- Device deployment outcome/recovery after cancellation or connection loss;
   Windows/macOS host packaging and Aurora execution of nested RPM layouts.
 - PSDK and BT build validation, Vulkan hardware presentation, ARM32 occlusion
   backend, broader Embree performance/editor checks, Aurora hot-reload acceptance.

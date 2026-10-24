@@ -8,7 +8,7 @@ Import("env")
 
 
 def embed_resources(target, source, env):
-    names = ("aurora_package_script", "aurora_engine_license", "aurora_engine_copyright")
+    names = ("aurora_package_script", "aurora_engine_license", "aurora_engine_copyright", "aurora_sdk_job_script")
     with open(str(target[0]), "w", encoding="utf-8") as stream:
         stream.write("// Generated; do not edit.\n#pragma once\n")
         for name, node in zip(names, source):
@@ -16,4 +16,8 @@ def embed_resources(target, source, env):
             stream.write("static const char " + name + "[] = " + json.dumps(content) + ";\n")
 
 
-env.Command("resources.gen.h", ["#misc/aurora/package.py", "#LICENSE.txt", "#COPYRIGHT.txt"], embed_resources)
+env.Command(
+    "resources.gen.h",
+    ["#misc/aurora/package.py", "#LICENSE.txt", "#COPYRIGHT.txt", "#misc/aurora/sdk_job.py"],
+    embed_resources,
+)

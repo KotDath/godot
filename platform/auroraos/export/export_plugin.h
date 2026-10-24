@@ -41,7 +41,7 @@ class EditorExportPlatformAuroraOS : public EditorExportPlatform {
 	String running_device;
 	String running_pid;
 	String running_start;
-	Error sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output = nullptr);
+	Error sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output = nullptr, const Dictionary &p_secret_environment = Dictionary());
 	Error stop_remote();
 	Error export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release);
 	String template_path(const Ref<EditorExportPreset> &p_preset, bool p_debug) const;

@@ -32,6 +32,7 @@
 
 #include "logo_svg.gen.h"
 #include "resources.gen.h"
+#include "sdk_executor.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
@@ -47,40 +48,6 @@
 #include "modules/svg/image_loader_svg.h"
 
 namespace {
-// OS::execute with captured output uses a host shell on Unix. Use argv-based
-// execution so SDK paths and device scripts remain literal arguments.
-Error execute_sdk(const String &p_path, const List<String> &p_arguments, String *r_output, int *r_exit_code) {
-	Dictionary process = OS::get_singleton()->execute_with_pipe(p_path, p_arguments, false);
-	ERR_FAIL_COND_V(process.is_empty(), ERR_CANT_FORK);
-	Ref<FileAccess> out = process["stdio"];
-	Ref<FileAccess> err = process["stderr"];
-	ProcessID pid = process["pid"];
-	Vector<uint8_t> stdout_bytes;
-	Vector<uint8_t> stderr_bytes;
-	auto read_pipe = [](const Ref<FileAccess> &p_pipe, Vector<uint8_t> &r_bytes) {
-		uint8_t buffer[4096];
-		uint64_t count = p_pipe->get_buffer(buffer, sizeof(buffer));
-		if (count > 0) {
-			int64_t offset = r_bytes.size();
-			r_bytes.resize(offset + count);
-			memcpy(r_bytes.ptrw() + offset, buffer, count);
-		}
-		return count;
-	};
-	while (true) {
-		bool running = OS::get_singleton()->is_process_running(pid);
-		uint64_t count = read_pipe(out, stdout_bytes) + read_pipe(err, stderr_bytes);
-		if (!running && count == 0) {
-			break;
-		}
-		if (count == 0) {
-			OS::get_singleton()->delay_usec(1000);
-		}
-	}
-	*r_exit_code = OS::get_singleton()->get_process_exit_code(pid);
-	*r_output = String::utf8((const char *)stdout_bytes.ptr(), stdout_bytes.size()) + String::utf8((const char *)stderr_bytes.ptr(), stderr_bytes.size());
-	return OK;
-}
 String shell_quote(const String &p_value) {
 	return "'" + p_value.replace("'", "'\"'\"'") + "'";
 }
@@ -310,7 +277,10 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 	option("--native-map", native_map_path);
 	String output;
 	int exit_code = -1;
-	error = execute_sdk(p_preset->get("sdk/sfdk"), arguments, &output, &exit_code);
+	error = AuroraSDK::execute(p_preset->get("sdk/sfdk"), arguments, "Packaging Aurora RPM", &output, &exit_code);
+	if (error == ERR_SKIP) {
+		return error;
+	}
 	if (error != OK || exit_code != 0) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora RPM", "SDK packaging failed. Templates and output directory must be visible in the SDK shared workspace.\n" + output);
 		return error != OK ? error : ERR_CANT_CREATE;
@@ -322,7 +292,10 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 	}
 	output = String();
 	exit_code = -1;
-	error = execute_sdk(p_preset->get("sdk/sfdk"), validation_arguments, &output, &exit_code);
+	error = AuroraSDK::execute(p_preset->get("sdk/sfdk"), validation_arguments, "Validating Aurora RPM", &output, &exit_code);
+	if (error == ERR_SKIP) {
+		return error;
+	}
 	if (error != OK || (exit_code != 0 && exit_code != 2)) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora validation", output);
 		return error != OK ? error : ERR_INVALID_DATA;
@@ -337,11 +310,7 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 			add_message(EXPORT_MESSAGE_ERROR, "Aurora signing", "Set the signing key and certificate in Editor Settings > Export > AuroraOS.");
 			return ERR_UNCONFIGURED;
 		}
-		// This synchronous SDK path cannot safely prompt for a passphrase.
-		if (FileAccess::get_file_as_string(key).contains("ENCRYPTED")) {
-			add_message(EXPORT_MESSAGE_ERROR, "Aurora signing", "Encrypted keys require external interactive signing; disable signing for this export.");
-			return ERR_UNAVAILABLE;
-		}
+		const bool protected_key = FileAccess::get_file_as_string(key).contains("ENCRYPTED");
 		String sfdk = p_preset->get("sdk/sfdk");
 		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "info", cert }, "Aurora certificate", &output);
 		if (error != OK) {
@@ -357,7 +326,17 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 		}
 		// A freshly built staged RPM is signed without --force. Existing output
 		// packages are not modified if signing fails.
-		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "sign", "--key", key, "--cert", cert, rpm }, "Aurora signing");
+		Dictionary secret_environment;
+		if (protected_key) {
+			String passphrase;
+			error = AuroraSDK::request_passphrase(passphrase);
+			if (error != OK) {
+				return error;
+			}
+			secret_environment["KEY_PASSPHRASE"] = passphrase;
+		}
+		error = sdk_command(sfdk, { "engine", "exec", "rpmsign-external", "sign", "--key", key, "--cert", cert, rpm }, "Aurora signing", nullptr, secret_environment);
+		secret_environment.clear();
 		if (error != OK) {
 			return error;
 		}
@@ -376,14 +355,20 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 	return error;
 }
 
-Error EditorExportPlatformAuroraOS::sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output) {
+Error EditorExportPlatformAuroraOS::sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output, const Dictionary &p_secret_environment) {
 	String output;
 	int exit_code = -1;
-	Error error = execute_sdk(p_sfdk, p_arguments, &output, &exit_code);
+	Error error = AuroraSDK::execute(p_sfdk, p_arguments, p_stage, &output, &exit_code, p_secret_environment);
 	if (r_output) {
 		*r_output = output;
 	}
+	if (error == ERR_SKIP) {
+		return error;
+	}
 	if (error != OK || exit_code != 0) {
+		if (!p_secret_environment.is_empty()) {
+			output += "Protected-key signing failed. Check the passphrase and selected key/certificate pair.\n";
+		}
 		add_message(EXPORT_MESSAGE_ERROR, p_stage, "SDK command failed (exit " + itos(exit_code) + ").\n" + output);
 		return error != OK ? error : FAILED;
 	}
