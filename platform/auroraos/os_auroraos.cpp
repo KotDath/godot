@@ -137,6 +137,11 @@ void OS_AuroraOS::run() {
 		return;
 	}
 	main_loop->initialize();
+#if defined(TOOLS_ENABLED) && defined(WAYLAND_ENABLED)
+	if (DisplayServer::get_singleton()->get_name() == "Wayland") {
+		static_cast<DisplayServerWayland *>(DisplayServer::get_singleton())->aurora_setup_editor();
+	}
+#endif
 	while (true) {
 		DisplayServer::get_singleton()->process_events();
 		if (Main::iteration()) {

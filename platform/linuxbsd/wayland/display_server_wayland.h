@@ -142,6 +142,11 @@ class DisplayServerWayland : public DisplayServer {
 	DisplayServerEnums::ScreenOrientation aurora_orientation = DisplayServerEnums::SCREEN_SENSOR;
 	int aurora_transform = 0;
 	void _aurora_update_orientation();
+	void _aurora_request_activation(DisplayServerEnums::WindowID p_window, bool p_initial);
+	void _aurora_update_activation_flags(DisplayServerEnums::WindowID p_window);
+#ifdef TOOLS_ENABLED
+	void _aurora_editor_play_stopped();
+#endif
 	bool aurora_paused = false;
 	void _aurora_update_lifecycle();
 	void _aurora_update_ime_context(bool p_from_ime = false, DisplayServerEnums::WindowID p_window = DisplayServerEnums::INVALID_WINDOW_ID);
@@ -263,6 +268,9 @@ public:
 	virtual bool is_touchscreen_available() const override;
 
 #ifdef AURORAOS_ENABLED
+#ifdef TOOLS_ENABLED
+	void aurora_setup_editor();
+#endif
 	void virtual_keyboard_show(const String &p_existing_text, const Rect2 &p_screen_rect, DisplayServerEnums::VirtualKeyboardType p_type, int p_max_length, int p_cursor_start, int p_cursor_end) override;
 	void virtual_keyboard_hide() override;
 	int virtual_keyboard_get_height() const override;

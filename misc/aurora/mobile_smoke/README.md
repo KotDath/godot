@@ -41,10 +41,11 @@ backend when available. No Qt runtime dependency or OS version check is added.
 Qt extended-surface visibility is an enum: Hidden=0 and Minimized=3 suspend the
 application; Windowed=2, Maximized=4 and FullScreen=5 resume it.
 
-The current IME adapter advertises empty surrounding text because Godot's IME API
-has no continuously synchronized editing context. Predictive surrounding-text
-replacement and selection are not implemented. Boot splash, XR, external displays
-and multiwindow rotation are outside the verified matrix.
+The IME adapter now synchronizes bounded surrounding text, cursor/selection and
+preedit state; password fields hide their context. See [IME.md](../IME.md) and
+[STATUS.md](../STATUS.md) for implemented operations and the remaining language,
+candidate-UI and hardware acceptance. Boot splash, XR, external displays and
+multiwindow rotation remain outside the verified matrix.
 
 Math checks (host, no SDK):
 

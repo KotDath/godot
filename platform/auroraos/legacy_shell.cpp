@@ -44,11 +44,16 @@ void configure(void *p_data, wl_shell_surface *, uint32_t, int32_t p_width, int3
 	window->ready = true;
 }
 void popup_done(void *, wl_shell_surface *) {}
-void visibility(void *data, qt_extended_surface *, int32_t visible) {
+void visibility(void *data, qt_extended_surface *surface, int32_t visible) {
 	auto *window = static_cast<WaylandThread::WindowState *>(data);
+	if (surface != window->qt_extended_surface) {
+		return;
+	}
 	// qt_extended_surface uses QWindow::Visibility, not a boolean.
-	if (visible != 1) { // Automatic does not specify a visibility state.
+	if (visible >= 0 && visible <= 5 && visible != 1) { // Automatic is unspecified.
 		window->suspended = visible == 0 || visible == 3; // Hidden or Minimized.
+		window->aurora_visibility_received = true;
+		activate_pending(*window);
 	}
 	print_verbose(vformat("Aurora surface visibility: %d", visible));
 }
@@ -115,6 +120,8 @@ void create(WaylandThread::WindowState &p_window) {
 	p_window.ready = true;
 }
 void destroy(WaylandThread::WindowState &p_window) {
+	p_window.aurora_activation_request = WaylandThread::WindowState::AuroraActivationRequest::NONE;
+	p_window.aurora_visibility_received = false;
 	if (p_window.qt_extended_surface) {
 		qt_extended_surface_destroy(p_window.qt_extended_surface);
 		p_window.qt_extended_surface = nullptr;

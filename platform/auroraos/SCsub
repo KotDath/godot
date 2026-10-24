@@ -5,7 +5,7 @@ Import("env")
 
 sources = ["godot_auroraos.cpp", "os_auroraos.cpp", "remote_session.cpp"]
 if env["wayland"]:
-    sources += ["legacy_shell.cpp", "text_input_v2.cpp", "orientation_wayland.cpp"]
+    sources += ["legacy_shell.cpp", "text_input_v2.cpp", "orientation_wayland.cpp", "window_activation.cpp"]
     sources += SConscript("#platform/linuxbsd/wayland/SCsub")
     protocol = "#platform/auroraos/protocol/surface-extension.xml"
     env.WAYLAND_API_HEADER("protocol/surface_extension.gen.h", protocol)

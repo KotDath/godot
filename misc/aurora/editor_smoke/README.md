@@ -22,7 +22,12 @@ remain at their original paths and can be imported explicitly. ARM32 hardware co
 
 4. Run the current scene (F6). Verify the log marker, a separate game process,
    the editor's loopback debugger connection, and the blue circle. If the shell
-   does not foreground the child, select its card in the app switcher.
+   does not foreground the child, record that failure before selecting its card
+   in the app switcher. The new Aurora activation path needs its own acceptance:
+   [WINDOW_ACTIVATION.md](../WINDOW_ACTIVATION.md). Check that a natural game exit
+   and Stop restore the editor with `run/auroraos/restore_editor_on_stop=true`,
+   and record actual focus transitions. Do not count manual card selection as
+   passing automatic activation.
 5. Return to the editor and Stop (F8). Verify the child process has exited.
 6. Reopen the project and check the saved scene and script, then run again.
 

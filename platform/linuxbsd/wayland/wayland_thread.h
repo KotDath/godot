@@ -362,6 +362,13 @@ public:
 		uint64_t ime_generation = 0;
 		struct qt_extended_surface *qt_extended_surface = nullptr;
 		struct wl_shell_surface *legacy_shell_surface = nullptr;
+		enum class AuroraActivationRequest : uint8_t {
+			NONE,
+			INITIAL,
+			EXPLICIT,
+		};
+		AuroraActivationRequest aurora_activation_request = AuroraActivationRequest::NONE;
+		bool aurora_visibility_received = false;
 #endif
 		struct xdg_surface *xdg_surface = nullptr;
 		struct xdg_toplevel *xdg_toplevel = nullptr;
@@ -1387,6 +1394,7 @@ public:
 	void cursor_shape_clear_custom_image(DisplayServerEnums::CursorShape p_cursor_shape);
 
 #ifdef AURORAOS_ENABLED
+	bool aurora_window_is_focused(DisplayServerEnums::WindowID p_window) const;
 	bool aurora_has_virtual_keyboard() const { return registry.aurora_text_manager && !registry.wp_text_input_manager; }
 	void aurora_cancel_touches();
 	void aurora_set_ime_context(DisplayServerEnums::WindowID p_window, const Dictionary &p_context, bool p_reset);

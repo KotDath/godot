@@ -1007,6 +1007,9 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 		window_set_mode(setup_mode, wd.id);
 
 		wayland_thread.window_set_title(p_window_id, wd.title);
+#ifdef AURORAOS_ENABLED
+		_aurora_request_activation(p_window_id, true);
+#endif
 	}
 }
 
@@ -1415,6 +1418,9 @@ void DisplayServerWayland::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 	} else {
 		wd.flags &= ~(1 << p_flag);
 	}
+#ifdef AURORAOS_ENABLED
+	_aurora_update_activation_flags(p_window_id);
+#endif
 }
 
 bool DisplayServerWayland::window_get_flag(DisplayServerEnums::WindowFlags p_flag, DisplayServerEnums::WindowID p_window_id) const {
@@ -1433,13 +1439,22 @@ void DisplayServerWayland::window_request_attention(DisplayServerEnums::WindowID
 }
 
 void DisplayServerWayland::window_move_to_foreground(DisplayServerEnums::WindowID p_window_id) {
+#ifdef AURORAOS_ENABLED
+	MutexLock mutex_lock(wayland_thread.mutex);
+	_aurora_request_activation(p_window_id, false);
+#else
 	// Standard Wayland APIs don't support this.
+#endif
 }
 
 bool DisplayServerWayland::window_is_focused(DisplayServerEnums::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
+#ifdef AURORAOS_ENABLED
+	return wayland_thread.aurora_window_is_focused(p_window_id);
+#else
 	return wayland_thread.pointer_get_pointed_window_id() == p_window_id;
+#endif
 }
 
 bool DisplayServerWayland::window_can_draw(DisplayServerEnums::WindowID p_window_id) const {

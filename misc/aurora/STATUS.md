@@ -3,9 +3,51 @@
 Branch: `4.7.2_auroraos`; engine base: upstream `ed1daf0bf` (4.7.2-stable).
 This is an experimental port, not a production release.
 
-Hardware inventory: `phone` (192.168.2.44) and `usb-serial-phone` (192.168.3.5)
+Hardware inventory: `phone` (Wi-Fi, 192.168.2.44) and
+`usb-serial-phone` (USB, 192.168.3.5)
 are USB/Wi-Fi connections to the **same KVADRA ARM64 tablet**. They do not count
 as two physical test devices. Real ARM32 hardware has not been supplied yet.
+
+## Window activation and editor return (point 3, software part)
+
+Added an Aurora-only adapter for initial legacy-toplevel activation and explicit
+foreground requests, including debugger/`Window.grab_focus()`. Initial requests
+wait for a concrete Qt visibility notification instead of relying on an early
+raise or a frame callback. The pending request is consumed once and cancelled
+when flags disallow focus or the surface is destroyed. Keyboard focus comes from
+live seats' actual focus IDs. Visibility/suspension is still compositor-owned.
+
+An Aurora editor connects the local run bar's `stop_pressed` signal after its
+main loop is initialized. `run/auroraos/restore_editor_on_stop` defaults to true
+and controls its foreground request. Games, Project Manager and headless runs
+have no editor callback. Policy lives in `platform/auroraos/window_activation.cpp`
+with narrow guarded Wayland hooks; ordinary Linux behavior is preserved.
+
+Four standalone-client checks pass on the **x86_64 SDK emulator** using actual
+native session supervision and `sfdk device exec`: no raise, pre-buffer raise,
+raise on concrete visibility and raise on first frame. This compositor initially
+focuses the child even without a request, which masks ineffective early raises.
+In all four cases, closing the child leaves its parent minimized/unfocused;
+one explicit parent request restores actual keyboard focus and visibility 4.
+Both clients finish with code 0 and their uploaded test files are removed.
+This exercises the protocol contract, **not the Godot callback/getter or ARM
+hardware**. The owned test emulator has been stopped.
+
+All **six ARM artifacts** (editor/debug/release for ARM32 and ARM64) compile and
+their ELF class/machine match the requested architecture. The Linux editor builds
+with `tests=yes use_static_cpp=no`; this host lacks static libstdc++. Its existing
+Aurora regressions pass **15 cases / 195 assertions**. A private KWin virtual
+compositor/D-Bus/runtime runs the real Linux Wayland/OpenGL game: 3D frame capture,
+extension → middle.so → leaf.so = 42 and clean exit pass with Mesa llvmpipe.
+Evidence is in `.aurora-tools/window-activation-linux-final/` and
+`.aurora-tools/window-activation-evidence/`. This working-tree build matrix does
+not complete point 13's clean-source provenance/CI requirements.
+
+Physical ARM64 automatic foreground, natural game exit/Stop, debugger foreground,
+focus reporting and the opt-out setting still require engine acceptance while
+the one KVADRA tablet is unreachable through both transports. App-cover previews
+remain open. Architecture, primary-source rationale and reproduction:
+[WINDOW_ACTIVATION.md](WINDOW_ACTIVATION.md), [editor_smoke/README.md](editor_smoke/README.md).
 
 ## Recoverable remote sessions and desktop controller (point 2)
 
@@ -312,7 +354,9 @@ fixture run from the installed editor binary; it is not a new sandbox claim.
 
 ARM64 and ARM32 editor builds pass with this change.
 `misc/aurora/ime_smoke` contains the fixture and log verifier. The context implementation adds surrounding-text and replacement ranges;
-remaining composition and geometry coverage is listed separately. ARM32 hardware and Linux Wayland runtime regression remain pending.
+remaining composition and geometry coverage is listed separately. ARM32 hardware
+and Linux composing-IME runtime coverage remain pending; the general Linux
+Wayland 3D/native-chain regression passes as recorded above.
 Aurora APM can retain an old `current` version while the editor is running; stop it
 and launch through RuntimeManager before checking an updated package.
 At that stage the SDK saw a stale Git worktree ref (`7281b98b6`) outside this source
@@ -453,8 +497,9 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
 - The normal launcher/firejail run starts a separate game process, connects the
   loopback debugger, forwards the script output and displays Remote Scene Tree.
   Stop terminates that process (checked independently using its device PID).
-  The shell currently requires manually choosing the child app card to foreground
-  the game; automatic activation and app-cover previews remain incomplete.
+  That tested RPM required manually choosing the child app card to foreground
+  the game. The activation adapter above still needs new engine/hardware
+  acceptance; app-cover previews remain incomplete.
 - An EditorPlugin calls the installed GDExtension → middle.so → leaf.so chain
   and gets 42 both in a developer launch and the normal sandbox. This verifies
   native calls in tool context, not native hot reload or compilation on device.

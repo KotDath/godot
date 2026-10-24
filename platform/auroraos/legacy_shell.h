@@ -38,6 +38,7 @@ namespace AuroraLegacyShell {
 bool bind(WaylandThread::RegistryState &p_registry, wl_registry *p_wl_registry, uint32_t p_name, const char *p_interface);
 bool remove(WaylandThread::RegistryState &p_registry, uint32_t p_name);
 void create(WaylandThread::WindowState &p_window);
+void activate_pending(WaylandThread::WindowState &p_window);
 void destroy(WaylandThread::WindowState &p_window);
 void set_mode(WaylandThread::WindowState &p_window, DisplayServerEnums::WindowMode p_mode);
 } //namespace AuroraLegacyShell
