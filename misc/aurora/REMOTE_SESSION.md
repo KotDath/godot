@@ -1,8 +1,8 @@
 # Recoverable SDK launches: native backend and editor integration
 
-The native backend is implemented and tested. **The desktop exporter's Run/Stop
-actions still use their previous implementation**; persistent editor-side session
-recovery and installation-outcome reconciliation are not integrated yet.
+The native backend and the desktop exporter's persistent Run/Stop controller
+are implemented and tested. **Installation-outcome reconciliation through APM
+and physical ARM64 acceptance remain pending.**
 
 ## Device ownership
 
@@ -52,33 +52,46 @@ exited but the supervisor is finishing group cleanup. `interrupted` preserves
 uncertainty when the supervisor disappeared without recording completion;
 it must not be interpreted as permission to signal a recycled PID.
 
-## Pending desktop integration
+## Desktop controller
 
-Before submitting an operation, persist a versioned local record under
-`EditorPaths::get_project_settings_dir()`, outside the saved export preset.
-Record the token, SDK executable/device, application ID, expected package version
-and operation phase. Write to a sibling temporary file and rename atomically.
-Failure to save must stop before submitting the remote operation.
+Before submitting installation/launch/Stop, the exporter persists
+`aurora-remote-session.json` under `EditorPaths::get_project_settings_dir()`
+(normally `.godot/editor`), outside the saved export preset. It records the token,
+SDK executable/device, application ID, RPM filename, staging path, operation
+phase and installation uncertainty. Writes use a sibling temporary file and
+atomic rename. Failure to save stops before submitting the next remote operation.
 
-On startup, restore this record without contacting the device automatically.
-Explicit Run/Stop queries the same token and reconciles its state. Restore a Stop
-entry even if the original launch reply was lost. A `missing` response is not
-enough to forget a request: it might still arrive later. Fence it with Stop
-before deleting the local record or submitting a replacement launch.
+Startup restores this record without contacting the device automatically.
+Run/Stop addresses the same saved device/token. A restored Stop entry is available
+before another Run, including after a lost launch reply. Retrying a `launching`
+operation queries its status and adopts an already running game without another
+installation/launch. A `missing` response is not enough to forget a request:
+it might still arrive later. Stop fences it before deleting the local record or
+submitting a replacement launch. Unconfirmed cleanup keeps the record available.
 
-Check template support for the native protocol **before deployment/launch**.
-Do not probe an arbitrary older installed template with the new launch flag:
-an older engine could ignore that flag and start the game. The new template's
-capability marker/protocol needs an export-time check; ordinary manual exports
-remain independent of a connected device.
+Before contacting the device, Run checks the selected template's native protocol
+marker inside a matching ARM ELF `PT_LOAD` segment. A marker in appended PCK data
+cannot authorize the protocol. Older/incorrect templates are rejected before an
+SDK operation; ordinary RPM exports still accept them. No new launch flag is sent
+to an arbitrary old installed engine to probe its behavior.
 
-Installation outcome is a separate state from game/process ownership. Retain
-the expected package identity when SDK deploy returns an uncertain result, and
-query the actual installed state before retrying/launching. The correct query
+Installation outcome is a separate state from game/process ownership. If SDK
+deploy does not confirm success, the signed RPM and staging directory are retained
+and no game launch is submitted. Run refuses a blind second installation while
+this record is unresolved. Explicit Stop fences the launch and archives the
+operation as `aurora-install-uncertain-TOKEN.json`; its package is retained.
+This does **not** establish whether the installation eventually succeeded.
+Querying the actual installed state is still pending. The correct query
 must be verified against Aurora's application package manager and its namespaces;
 a global RPM database query alone has not been established as sufficient.
 Stop fences game launch and terminates its owned runtime, but must not claim to
 roll back an already submitted installation or delete user data.
+
+The documented [Market API](https://developer.auroraos.ru/doc/5.1.7/software_development/reference/data_and_contacts/market_api/market)
+offers installed packages and active/completed operations through `GetAllProperties`.
+Its caller identity/permissions and applicability to SDK-originated installation
+need checking on the device; it is not yet used by this exporter. Presence of an
+OS-version number alone will not enable a backend.
 
 ## Evidence and reproduction — 2026-10-24
 
@@ -92,9 +105,10 @@ before launch, a TERM-ignoring descendant, foreign/stale PID records, supervisor
 HUP/TERM, nonzero normal exit and capability/invalid-token handling. Test state
 uses a disposable child HOME, without modifying the user's environment/settings.
 
-ARM32 and ARM64 debug templates build. Both actual ARM binaries run the capability
-probe and native fork → exec → exit workflow, and reject a fenced launch inside
-their SDK targets (SDK emulation, **not physical hardware**):
+ARM32/ARM64 editor and debug/release template builds pass. Actual ARM debug and
+release binaries run the capability probe and native fork → exec → exit workflow,
+and reject a fenced launch inside their SDK targets (SDK emulation,
+**not physical hardware**):
 
 ```sh
 python3 misc/aurora/remote_session_sdk_smoke.py \
@@ -108,7 +122,19 @@ Repeat with the matching `armv7hl` target and ARM32 binary. The target names are
 examples, not OS-version requirements. The runner records the exact binary
 SHA256 and explicitly records `hardware=false`.
 
-Still required: exporter journal/Run/Stop integration and its transport-failure
-tests; new editor/release-template builds; real ARM64 SDK/sandbox acceptance;
-installation reconciliation. Real ARM32 hardware remains excluded from the
-current goal. KVADRA is currently unreachable through both of its connections.
+The desktop controller's 3 C++ cases / 37 assertions verify ownership/status
+parsing, ARM ELF capability boundaries and JSON round-trip compatibility.
+The restart integration caught strict Variant equality rejecting JSON's floating
+`schema=1.0`; the codec now accepts numeric version 1 and rejects other types/versions.
+
+Six menu-driven scenarios pass with the actual Linux editor and real SDK
+packaging/validation/development signing, using a **fake device** backed by the
+actual native supervisor: lost launch reply/recovery without duplication, restored
+Stop before Run, uncertain install/RPM retention, unsupported-template preflight,
+late-request fencing and a blocked journal write preventing deployment.
+See [deploy_recovery_smoke](deploy_recovery_smoke/README.md).
+
+Still required: real ARM64 SDK/sandbox acceptance and installation reconciliation.
+Real ARM32 hardware remains excluded from the current goal. KVADRA is currently
+unreachable through both of its connections. Final artifact provenance/matrix
+validation is tracked separately in point 13.

@@ -25,6 +25,11 @@ use a reachable PC debug address and inspect the debug session separately.
 
 ## Recorded result — 2026-10-23
 
+This result predates the persistent session-controller redesign. Rebuild the
+current runtime template before using this fixture again. The new controller's
+software failure/restart tests are in [deploy_recovery_smoke](../deploy_recovery_smoke/README.md);
+its physical device path has not yet been revalidated.
+
 The menu-driven test passed on KVADRA ARM64 with the dependency-chain project:
 Regular validation/signing → sfdk installation/update → launch → debugger
 connection → Stop. GLES rendered the cube and text; the native extension returned

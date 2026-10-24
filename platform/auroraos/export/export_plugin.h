@@ -37,10 +37,13 @@ class EditorExportPlatformAuroraOS : public EditorExportPlatform {
 	GDCLASS(EditorExportPlatformAuroraOS, EditorExportPlatform);
 	Ref<ImageTexture> logo;
 	int menu_options = 0;
-	String running_sfdk;
-	String running_device;
-	String running_pid;
-	String running_start;
+	Dictionary remote_session;
+	String session_path;
+	bool session_loaded = false;
+	Error session_error = OK;
+	Error load_session();
+	Error save_session(const Dictionary &p_record);
+	Error remote_action(const String &p_action, Dictionary &r_status, const List<String> &p_launch_arguments = List<String>());
 	Error sdk_command(const String &p_sfdk, const List<String> &p_arguments, const String &p_stage, String *r_output = nullptr, const Dictionary &p_secret_environment = Dictionary());
 	Error stop_remote();
 	Error export_project_internal(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<DebugFlags> p_flags, bool p_notify, const String &p_release);

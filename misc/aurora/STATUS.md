@@ -7,7 +7,7 @@ Hardware inventory: `phone` (192.168.2.44) and `usb-serial-phone` (192.168.3.5)
 are USB/Wi-Fi connections to the **same KVADRA ARM64 tablet**. They do not count
 as two physical test devices. Real ARM32 hardware has not been supplied yet.
 
-## Recoverable remote-session backend (point 2, integration pending)
+## Recoverable remote sessions and desktop controller (point 2)
 
 Added an Aurora-only native supervisor mode before OS/display initialization.
 It detaches, reserves a token once, publishes boot/PID/start-time records before
@@ -22,11 +22,30 @@ unaffected foreign processes and supervisor HUP/TERM. ARM32/ARM64 debug template
 build; both actual ARM executables pass the capability probe and native fork/exec/
 exit/fence smoke inside the SDK. These are SDK/emulation results, not hardware.
 
-This backend is not yet connected to the exporter's existing Run/Stop commands.
-The local persistent journal, template-capability gate, restored Stop entry and
-installation-outcome reconciliation remain open. Editor/release-template builds
-for the new mode and physical ARM64 acceptance remain pending. Architecture,
-protocol and reproduction: [REMOTE_SESSION.md](REMOTE_SESSION.md).
+The exporter now uses this backend. Its journal is saved before installation,
+launch and Stop, restored locally on editor restart, and keeps Stop available
+even when a launch reply was lost. Retrying an unconfirmed launch adopts an
+already running game without another install/launch. Stop fences a missing/late
+request before clearing the record. Runtime capability is checked in ARM ELF load
+segments before contacting the device; appended PCK text cannot satisfy the gate.
+
+Three C++ cases / 37 assertions pass, including schema JSON round-trip. The real
+restart test found strict Variant equality rejected JSON's numeric `1.0`; fixed
+the codec to accept numeric version 1 while rejecting other types/versions.
+Six editor-menu cases pass using real SDK RPM packaging/validation/development
+signing and a **fake device** with the actual native supervisor: recovered launch
+without duplication, Stop after editor restart, uncertain installation retention,
+template preflight, late-launch fencing and journal-write failure before deployment.
+These establish controller/software behavior, not physical device acceptance.
+
+An unconfirmed installation retains its signed RPM/staging. Run does not blindly
+submit another installation. Explicit Stop fences launch, archives the uncertain
+operation and preserves the package; it does not roll back or prove installation.
+Automatic APM outcome reconciliation and physical ARM64 SDK/sandbox acceptance
+remain open. Linux and both ARM editor builds pass; both ARM release templates
+also build and pass native fork/exec/exit/fence SDK smoke. Final clean-source
+artifact provenance is still a separate point-13 gate. Architecture and reproduction:
+[REMOTE_SESSION.md](REMOTE_SESSION.md), [deploy_recovery_smoke/README.md](deploy_recovery_smoke/README.md).
 
 ## Protected-key signing and cancellable SDK jobs (point 2)
 
@@ -65,9 +84,9 @@ Aurora C++ regression also passes. ARM compilation does not establish hardware
 acceptance of the desktop export UI.
 
 This closes protected-key input and in-command SDK-engine cancellation. A local
-`deploy`/`device exec` cancellation only stops the sfdk transport: resolving an
-already submitted device operation and recovering its PID after connection loss
-remain pending. Windows/macOS export hosts are still disabled. Reproduction:
+`deploy`/`device exec` cancellation stops the local sfdk transport. Launch-session
+recovery is now integrated above; installation outcome reconciliation remains
+pending. Windows/macOS export hosts are still disabled. Reproduction:
 [signing_smoke/README.md](signing_smoke/README.md).
 
 ## Deferred documentation work after editor shutdown
@@ -364,18 +383,21 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
 - The desktop exporter now supports optional Regular signing and Remote Deploy
   through sfdk, with device/key/certificate paths in local Editor Settings.
   Run and Stop use SDK device commands; no audb dependency is added to the product.
-- Linux editor builds. A real editor-menu integration run on registered
-  `KVADRA_T (ARM 64bit)` exports, validates, signs, installs and launches the
+- Before the session-controller redesign, a real editor-menu integration run on
+  registered `KVADRA_T (ARM 64bit)` exported, validated, signed, installed and launched the
   GDExtension test project. It renders the 3D scene, returns 42 from the native
   dependency chain, records touch input, connects to the PC debugger and stops
   its own process. Device PID termination was independently checked. A second
   deployment updates successfully, reconnects to the debugger, and preserves the
   in-game persisted launch counter (1 → 2). An ARM32 preset on the ARM64 device
   is rejected before export/installation. Standalone signed headless export
-  also passes and retains the preset release (the development suffix is Run-only).
+  also passed and retained the preset release (the development suffix is Run-only).
+  This records the earlier device result; the new supervisor/controller path still
+  needs its own physical acceptance, separately from its passing software fixture.
 - SDK deployment requires a complete RPM filename. Aurora rejects the same
   package version/release on reinstall, so Remote Deploy adds a unique development
-  release suffix without changing the saved preset. Temporary packages are cleaned.
+  release suffix without changing the saved preset. Confirmed operations clean
+  temporary packages; unconfirmed installations retain them for reconciliation.
 - SDK invocations use argv-based pipes: the captured-output OS::execute Unix path
   would otherwise expand shell variables on the host. No original Linux code was
   changed for this fix.
@@ -383,7 +405,8 @@ Priority: **6, 5, 7, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13**; see
   Regular validation has the existing non-Silica warning only. Installation may
   require confirming the SDK dialog on the device.
 - Protected-key signing and SDK-engine cancellation are now verified above.
-  Still pending: device operation connection-loss recovery, normal launcher/sandbox acceptance,
+  Launch-session recovery now passes the software fixture. Still pending:
+  installation outcome reconciliation, new-path normal launcher/sandbox acceptance,
   ARM32 hardware, and native GDB. This is a developer launch through SDK.
 - Setup and limits: [EXPORT.md](EXPORT.md); opt-in integration fixture:
   [deploy_smoke/README.md](deploy_smoke/README.md).
@@ -450,7 +473,8 @@ libxkbcommon is bundled with its license because it is not Regular public API.
   and keyboard avoidance; lock/unlock and broader lifecycle testing; audible
   playback/resource routing. Multiwindow, XR and boot-splash rotation are unverified.
 - ARM32 hardware tests (no ARM32 test device assigned).
-- Device deployment outcome/recovery after cancellation or connection loss;
+- Installation outcome reconciliation after cancellation/connection loss and
+  physical acceptance of the new launch-session controller;
   Windows/macOS host packaging and Aurora execution of nested RPM layouts.
 - PSDK and BT build validation, Vulkan hardware presentation, ARM32 occlusion
   backend, broader Embree performance/editor checks, Aurora hot-reload acceptance.

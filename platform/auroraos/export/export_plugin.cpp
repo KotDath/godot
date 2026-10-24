@@ -31,10 +31,12 @@
 #include "export_plugin.h"
 
 #include "logo_svg.gen.h"
+#include "remote_deploy_state.h"
 #include "resources.gen.h"
 #include "sdk_executor.h"
 
 #include "core/config/project_settings.h"
+#include "core/crypto/crypto_core.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
@@ -43,14 +45,12 @@
 #include "editor/editor_node.h"
 #include "editor/export/editor_export.h"
 #include "editor/export/editor_export_preset.h"
+#include "editor/file_system/editor_paths.h"
 #include "editor/settings/editor_settings.h"
 
 #include "modules/svg/image_loader_svg.h"
 
 namespace {
-String shell_quote(const String &p_value) {
-	return "'" + p_value.replace("'", "'\"'\"'") + "'";
-}
 Error write_text(const String &p_path, const char *p_text) {
 	Error error;
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE, &error);
@@ -61,7 +61,11 @@ Error write_text(const String &p_path, const char *p_text) {
 }
 struct StagingDirectory {
 	String path;
+	bool preserve = false;
 	~StagingDirectory() {
+		if (preserve) {
+			return;
+		}
 		Ref<DirAccess> directory = DirAccess::open(path);
 		if (directory.is_valid()) {
 			directory->erase_contents_recursive();
@@ -375,11 +379,57 @@ Error EditorExportPlatformAuroraOS::sdk_command(const String &p_sfdk, const List
 	return OK;
 }
 
+Error EditorExportPlatformAuroraOS::load_session() {
+	if (session_loaded) {
+		return session_error;
+	}
+	if (!EditorPaths::get_singleton()) {
+		return ERR_UNCONFIGURED;
+	}
+	session_path = ProjectSettings::get_singleton()->globalize_path(EditorPaths::get_singleton()->get_project_settings_dir()).path_join("aurora-remote-session.json");
+	session_error = AuroraDeploy::load_record(session_path, remote_session);
+	session_loaded = true;
+	return session_error;
+}
+
+Error EditorExportPlatformAuroraOS::save_session(const Dictionary &p_record) {
+	Error error = load_session();
+	if (error == OK) {
+		error = AuroraDeploy::save_record(session_path, p_record);
+	}
+	if (error == OK) {
+		remote_session = p_record.duplicate(true);
+	} else {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora session", "Could not save the remote operation record: " + session_path);
+	}
+	return error;
+}
+
+Error EditorExportPlatformAuroraOS::remote_action(const String &p_action, Dictionary &r_status, const List<String> &p_launch_arguments) {
+	ERR_FAIL_COND_V(remote_session.is_empty(), ERR_UNCONFIGURED);
+	List<String> arguments{ "device", "exec", remote_session["device"], "--", "sh", "-c", aurora_remote_session_script, "--", p_action, remote_session["token"] };
+	for (const String &argument : p_launch_arguments) {
+		arguments.push_back(argument);
+	}
+	String output;
+	Error error = sdk_command(remote_session["sfdk"], arguments, "Aurora " + p_action, &output);
+	if (error != OK) {
+		add_message(EXPORT_MESSAGE_WARNING, "Aurora session", "Remote operation was not confirmed. Its session record is retained. Reconnect and use Stop Aurora project before replacing the launch.");
+		return error;
+	}
+	error = AuroraDeploy::parse_status(output, remote_session["token"], r_status);
+	if (error != OK) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora session", "SDK returned an invalid session response. The operation record is retained for recovery.");
+	}
+	return error;
+}
+
 bool EditorExportPlatformAuroraOS::poll_export() {
+	load_session(); // Local file only; polling never contacts the device.
 	Ref<EditorExportPreset> preset = EditorExport::get_singleton()->get_runnable_preset_for_platform(this);
 	int previous = menu_options;
 	menu_options = (preset.is_valid() && bool(preset->get("remote_deploy/enabled"))) ? 1 : 0;
-	if (!running_pid.is_empty()) {
+	if (!remote_session.is_empty()) {
 		menu_options = 2;
 	}
 	return previous != menu_options;
@@ -390,19 +440,45 @@ String EditorExportPlatformAuroraOS::get_option_label(int p_index) const {
 }
 
 String EditorExportPlatformAuroraOS::get_option_tooltip(int p_index) const {
-	return p_index == 0 ? "Export, sign, install and launch on the device selected in Editor Settings > Export > AuroraOS" : "Stop only the process launched by this editor session; keep the installed package and user data";
+	return p_index == 0 ? "Export, sign, install and launch on the device selected in Editor Settings > Export > AuroraOS" : "Cancel the saved launch and stop its owned process; keep the installed package and user data";
 }
 
 Error EditorExportPlatformAuroraOS::stop_remote() {
-	if (running_pid.is_empty()) {
+	Error error = load_session();
+	if (error != OK) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora session", "Cannot read the saved session record: " + session_path);
+		return error;
+	}
+	if (remote_session.is_empty()) {
 		return OK;
 	}
-	// Compare the kernel start time as well as PID to avoid stopping a reused PID.
-	String script = "test ! -r /proc/" + running_pid + "/stat || { test \"$(awk '{print $22}' /proc/" + running_pid + "/stat)\" != " + shell_quote(running_start) + " || kill " + running_pid + "; }";
-	Error error = sdk_command(running_sfdk, { "device", "exec", running_device, "--", "sh", "-c", script }, "Aurora stop");
+	Dictionary pending = remote_session.duplicate(true);
+	pending["phase"] = "stopping";
+	error = save_session(pending);
+	if (error != OK) {
+		return error;
+	}
+	Dictionary status;
+	error = remote_action("stop", status);
+	if (error != OK) {
+		return error;
+	}
+	String state = status["state"];
+	if (state != "stopped" && state != "exited" && state != "failed") {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora stop", "Process cleanup is not confirmed (" + state + "). The saved session remains available for another Stop attempt.");
+		return ERR_BUSY;
+	}
+	if (bool(remote_session.get("install_unconfirmed", false))) {
+		String archive = session_path.get_base_dir().path_join("aurora-install-uncertain-" + String(remote_session["token"]) + ".json");
+		error = AuroraDeploy::save_record(archive, remote_session);
+		if (error != OK) {
+			return error;
+		}
+		add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "Game launch is cancelled. SDK installation outcome is still unconfirmed; its package and operation record are retained at " + archive + ". Stop does not roll back an installation.");
+	}
+	error = DirAccess::remove_absolute(session_path);
 	if (error == OK) {
-		running_pid = String();
-		running_start = String();
+		remote_session.clear();
 	}
 	return error;
 }
@@ -411,6 +487,39 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 	ERR_FAIL_COND_V(p_device < 0 || p_device > 1, ERR_INVALID_PARAMETER);
 	if (p_device == 1) {
 		return stop_remote();
+	}
+	Error error = load_session();
+	if (error != OK) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora session", "Cannot read the saved session record: " + session_path);
+		return error;
+	}
+	if (!remote_session.is_empty() && String(remote_session["phase"]) != "running") {
+		if (bool(remote_session.get("install_unconfirmed", false))) {
+			add_message(EXPORT_MESSAGE_ERROR, "Aurora installation", "The previous SDK installation was not confirmed. Use Stop Aurora project to fence its pending launch before retrying; the installation itself may still be in progress.");
+			return ERR_BUSY;
+		}
+		if (String(remote_session["phase"]) == "launching") {
+			Dictionary status;
+			error = remote_action("status", status);
+			if (error != OK) {
+				return error;
+			}
+			if (String(status["state"]) == "running") {
+				Dictionary recovered = remote_session.duplicate(true);
+				recovered["phase"] = "running";
+				recovered["status"] = status;
+				error = save_session(recovered);
+				if (error == OK) {
+					add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Recovered the existing launch on " + String(remote_session["device"]) + "; no second installation or game was submitted.");
+				}
+				return error;
+			}
+		}
+		// Even a missing reply must be fenced: its request could arrive later.
+		error = stop_remote();
+		if (error != OK) {
+			return error;
+		}
 	}
 	String device = EDITOR_GET("export/auroraos/device");
 	if (device.is_empty() || !bool(p_preset->get("signing/enabled"))) {
@@ -421,25 +530,26 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora deploy", "Remote filesystem and localhost forwarding are not supported. Use an embedded project and a PC debug address reachable from the device.");
 		return ERR_UNAVAILABLE;
 	}
+	String arch = p_preset->get("binary_format/architecture");
+	if (!AuroraDeploy::supports_session(FileAccess::open(template_path(p_preset, true), FileAccess::READ), arch)) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora deploy", "Rebuild the Aurora debug export template with native remote-session support. Older templates remain usable for ordinary RPM export.");
+		return ERR_UNAVAILABLE;
+	}
 	EditorProgress progress("aurora_run", "Running on Aurora OS", 4);
 	String sfdk = p_preset->get("sdk/sfdk");
 	String machine;
-	Error error = sdk_command(sfdk, { "device", "exec", device, "--", "uname", "-m" }, "Aurora device", &machine);
+	error = sdk_command(sfdk, { "device", "exec", device, "--", "uname", "-m" }, "Aurora device", &machine);
 	if (error != OK) {
 		return error;
 	}
-	String arch = p_preset->get("binary_format/architecture");
 	if (machine.strip_edges() != (arch == "arm32" ? "armv7l" : "aarch64")) {
 		add_message(EXPORT_MESSAGE_ERROR, "Aurora device", "Device architecture does not match the export preset: " + machine);
 		return ERR_INVALID_DATA;
 	}
-	// Keep staging within the project shared with the SDK, not host /tmp.
 	String stage = ProjectSettings::get_singleton()->globalize_path("res://.godot/aurora-deploy").path_join(itos(OS::get_singleton()->get_process_id()) + "-" + uitos(OS::get_singleton()->get_ticks_usec()));
 	error = DirAccess::make_dir_recursive_absolute(stage);
 	ERR_FAIL_COND_V(error != OK, error);
 	StagingDirectory staging{ stage };
-	// Aurora rejects reinstalling the same NEVRA. Give each development deploy
-	// a new RPM release without changing the saved export preset.
 	String deploy_release = String(p_preset->get("package/release")) + ".godot." + uitos(uint64_t(OS::get_singleton()->get_unix_time() * 1000000.0));
 	String rpm_name = String(p_preset->get("package/unique_name")) + "-" + String(p_preset->get("package/version")) + "-" + deploy_release + "." + (arch == "arm32" ? "armv7hl" : "aarch64") + ".rpm";
 	ERR_FAIL_COND_V(rpm_name != rpm_name.validate_filename(), ERR_INVALID_PARAMETER);
@@ -461,35 +571,61 @@ Error EditorExportPlatformAuroraOS::run(const Ref<EditorExportPreset> &p_preset,
 	if (progress.step("Installing RPM through SDK", 2)) {
 		return ERR_SKIP;
 	}
+	CryptoCore::RandomGenerator random;
+	uint8_t bytes[16];
+	error = random.init();
+	if (error == OK) {
+		error = random.get_random_bytes(bytes, sizeof(bytes));
+	}
+	ERR_FAIL_COND_V(error != OK, error);
+	Dictionary record;
+	record["schema"] = 1;
+	record["token"] = String::hex_encode_buffer(bytes, sizeof(bytes));
+	record["sfdk"] = sfdk;
+	record["device"] = device;
+	record["package"] = p_preset->get("package/unique_name");
+	record["rpm"] = rpm_name;
+	record["staging"] = stage;
+	record["phase"] = "installing";
+	record["install_unconfirmed"] = true;
+	error = save_session(record);
+	if (error != OK) {
+		return error;
+	}
 	error = sdk_command(sfdk, { "-c", "device=" + device, "deploy", "--sdk", "--keepUserData", "--", rpm }, "Aurora installation");
 	if (error != OK) {
+		staging.preserve = true;
+		add_message(EXPORT_MESSAGE_WARNING, "Aurora installation", "Installation was not confirmed. The signed RPM is retained at " + rpm + "; no game launch was submitted.");
+		return error;
+	}
+	record["phase"] = "launching";
+	record["install_unconfirmed"] = false;
+	error = save_session(record);
+	if (error != OK) {
+		staging.preserve = true;
 		return error;
 	}
 	if (progress.step("Launching debug project", 3)) {
 		return ERR_SKIP;
 	}
-	String command = shell_quote("/usr/bin/" + String(p_preset->get("package/unique_name")));
+	List<String> launch_arguments{ "/usr/bin/" + String(p_preset->get("package/unique_name")) };
 	for (const String &argument : gen_export_flags(p_debug_flags)) {
-		command += " " + shell_quote(argument);
+		launch_arguments.push_back(argument);
 	}
-	// SDK developer launch, not the application launcher's sandbox context.
-	String script = "umask 077; mkdir -p \"$HOME/.cache/godot-aurora\" || exit 1; nohup " + command + " >\"$HOME/.cache/godot-aurora/" + String(p_preset->get("package/unique_name")) + ".log\" 2>&1 </dev/null & app_pid=$!; sleep 1; test -r /proc/$app_pid/stat || exit 1; printf 'GODOT_AURORA_PID:%s:%s\\n' \"$app_pid\" \"$(awk '{print $22}' /proc/$app_pid/stat)\"";
-	String output;
-	error = sdk_command(sfdk, { "device", "exec", device, "--", "sh", "-c", script }, "Aurora launch", &output);
+	Dictionary status;
+	error = remote_action("launch", status, launch_arguments);
 	if (error != OK) {
 		return error;
 	}
-	for (const String &line : output.split("\n")) {
-		PackedStringArray fields = line.strip_edges().split(":");
-		if (fields.size() == 3 && fields[0] == "GODOT_AURORA_PID" && fields[1].is_valid_int() && fields[1].to_int() > 1 && fields[2].is_valid_int()) {
-			running_sfdk = sfdk;
-			running_device = device;
-			running_pid = fields[1];
-			running_start = fields[2];
-			add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Started PID " + running_pid + " on " + device + ". Log: ~/.cache/godot-aurora/" + String(p_preset->get("package/unique_name")) + ".log");
-			return OK;
-		}
+	if (String(status["state"]) != "running") {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora launch", "Game startup is not confirmed (" + String(status["state"]) + "). Its saved session remains available for Run recovery or Stop.");
+		return ERR_BUSY;
 	}
-	add_message(EXPORT_MESSAGE_ERROR, "Aurora launch", "SDK did not return a process identifier. Check ~/.cache/godot-aurora on the device.\n" + output);
-	return FAILED;
+	record["phase"] = "running";
+	record["status"] = status;
+	error = save_session(record);
+	if (error == OK) {
+		add_message(EXPORT_MESSAGE_INFO, "Aurora launch", "Started PID " + String(status["pid"]) + " on " + device + ". Log: ~/.cache/godot-aurora/" + String(record["token"]) + ".log");
+	}
+	return error;
 }
