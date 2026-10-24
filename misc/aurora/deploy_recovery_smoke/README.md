@@ -93,6 +93,10 @@ An additional `--arch arm32 --cases install_recover` run passes with a real
 ARM32 signed RPM. Extracted ELF metadata/ARM32 hard-float flags, exact native
 project mappings, per-library RUNPATH closure and receipt hashes pass for both
 architectures. These are packaging/fake-device results, not ARM execution.
+The packager also checks the host-selected template SHA256 before and after
+copying. A separate negative check in the real SDK rejects a stale template
+before any package is created; this covers the shared-mount boundary beyond the
+editor's native capability check. The Python regression set now has 39 cases.
 
 Real ARM device verification remains required; software fixtures cannot establish
 APM permissions or namespace behavior on that device. A separate read-only SDK

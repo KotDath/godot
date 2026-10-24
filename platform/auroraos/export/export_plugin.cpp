@@ -234,7 +234,14 @@ Error EditorExportPlatformAuroraOS::export_project_internal(const Ref<EditorExpo
 		arguments.push_back(p_name);
 		arguments.push_back(p_value);
 	};
-	option("--binary", template_path(p_preset, p_debug));
+	String binary = template_path(p_preset, p_debug);
+	String binary_digest = FileAccess::get_sha256(binary);
+	if (binary_digest.length() != 64) {
+		add_message(EXPORT_MESSAGE_ERROR, "Aurora template", "Could not hash the selected export template.");
+		return ERR_CANT_OPEN;
+	}
+	option("--binary", binary);
+	option("--binary-sha256", binary_digest);
 	option("--pck", pack_path);
 	option("--pck-sha256", FileAccess::get_sha256(pack_path));
 	option("--arch", arch);

@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -15,6 +16,33 @@ spec.loader.exec_module(package)
 
 
 class EmbeddedPackTests(unittest.TestCase):
+    def test_stale_template_rejected_before_sdk_tools_or_rpm_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "game"
+            binary.write_bytes(b"previous SDK view of the template")
+            pack = root / "game.pck"
+            pack.write_bytes(b"GDPCresources")
+            output = root / "rpms"
+            command = [
+                "package.py",
+                "--binary",
+                str(binary),
+                "--binary-sha256",
+                hashlib.sha256(b"selected host template").hexdigest(),
+                "--pck",
+                str(pack),
+                "--arch",
+                "arm64",
+                "--output",
+                str(output),
+            ]
+            with patch.object(sys, "argv", command), patch.object(package.subprocess, "check_output") as sdk:
+                with self.assertRaisesRegex(ValueError, "Template SHA256 mismatch"):
+                    package.main()
+                sdk.assert_not_called()
+            self.assertFalse(output.exists())
+
     def test_runtime_receipt_hashes_final_pack_and_nested_private_library(self):
         with tempfile.TemporaryDirectory(prefix="aurora receipt ") as directory:
             stage = Path(directory)

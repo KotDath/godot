@@ -48,7 +48,7 @@ its marked staging RPM/owner file, leaving unknown contents intact.
 The controller/APM C++ regression passes **7 cases / 84 assertions**, including
 GVariant parsing, exact checksum sets, confined receipt paths, supported launch
 arguments, ARM ELF capability boundaries and JSON versions 1/2. The complete
-Aurora C++ regression passes **15 cases / 195 assertions**; all **38 Python cases**
+Aurora C++ regression passes **15 cases / 195 assertions**; all **39 Python cases**
 pass, including actual native-source session tests.
 
 **14 editor-menu scenarios** pass using real SDK RPM packaging/Regular validation/
@@ -62,6 +62,9 @@ an earlier successful verification incorrectly surviving a failed recheck;
 the fix now revokes it durably and Stop retains the uncertain RPM. ARM32
 committed-install recovery also passes, with extracted ELF/manifest/RUNPATH closure
 and actual payload hashes verified for both architectures. These are software results.
+Host template SHA256 is now checked at SDK input and after copying, before ELF
+changes. The real SDK rejects a deliberately stale input before creating an RPM;
+the host capability gate cannot be bypassed by an older cached template view.
 
 A separate read-only check on the real x86_64 SDK emulator confirms APM method
 signatures, installed ID/version, pending-state output and ordinary-user active
@@ -90,7 +93,7 @@ belongs to the active modal export window. SDK progress selects the GUI directly
 instead of relying on EditorNode's startup command-line flag, which can be set
 before a Wayland window first becomes drawable. Original Linux code is unchanged.
 
-Validation: **38 Python cases** pass, including packaging/build and native-session regressions;
+Validation: **39 Python cases** pass, including packaging/build and native-session regressions;
 the real SDK smoke checks exact exit/Unicode, secret suppression, SIGTERM-ignoring
 child cancellation, an unaffected unrelated SDK job, client EOF/lease loss and
 SIGHUP/SIGTERM cleanup of the owned child.

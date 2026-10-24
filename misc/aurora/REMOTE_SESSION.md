@@ -78,6 +78,11 @@ marker inside a matching ARM ELF `PT_LOAD` segment. A marker in appended PCK dat
 cannot authorize the protocol. Older/incorrect templates are rejected before an
 SDK operation; ordinary RPM exports still accept them. No new launch flag is sent
 to an arbitrary old installed engine to probe its behavior.
+The exporter also supplies the selected template's host SHA256. The SDK packager
+must match it both at input and after copying, before any ELF edits/PCK append.
+This prevents a stale SDK shared-file view from substituting an older template
+after the host capability check. PCK and project-native inputs have their own
+host-digest checks. The runtime receipt then identifies the transformed payload.
 
 ## Installation registration and active runtime
 
@@ -197,6 +202,8 @@ installation or a duplicate game during recovery.
 The added stale-recheck/Stop regression fails with the previous editor and passes
 after durable snapshot revocation. ARM32 committed-install recovery also passes;
 both architectures' extracted ELF/manifest/RUNPATH closure and receipt bytes match.
+The separate stale-template check passes in the actual SDK: mismatching host
+SHA256 fails before SDK tools/RPM creation. All 39 Python regression cases pass.
 See [deploy_recovery_smoke](deploy_recovery_smoke/README.md).
 
 Still required: real ARM64 SDK/sandbox acceptance of the complete recovery path.

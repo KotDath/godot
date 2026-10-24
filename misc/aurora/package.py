@@ -169,22 +169,32 @@ def append_pck(executable, pck, expected_sha256=None):
             destination.write(struct.pack("<Q4s", size, b"GDPC"))
 
 
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_binary_digest(path, expected):
+    if expected is not None and file_sha256(path) != expected.lower():
+        raise ValueError("Template SHA256 mismatch: refresh the SDK shared file: " + str(path))
+
+
 def runtime_receipt(stage, files, name, version, release, arch):
     """Identify the packaged native runtime, after RPATH edits/strip/PCK append."""
     hashes = {}
     for path in files:
         installed = "/" + path.relative_to(stage).as_posix()
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        hashes[installed] = digest.hexdigest()
+        hashes[installed] = file_sha256(path)
     return {"schema": 1, "package": name, "version": version, "release": release, "arch": arch, "files": hashes}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--binary-sha256", help="Selected template SHA256 calculated on the export host")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--project", type=Path, help="Unpacked development project (editor binary only)")
     source.add_argument("--pck", type=Path, help="Embed a game PCK without enabling path overrides")
@@ -216,6 +226,9 @@ def main():
         parser.error("--receipt requires an embedded PCK with stripping disabled after packaging")
     if args.pck_sha256 is not None and (not args.pck or not re.fullmatch(r"[0-9a-fA-F]{64}", args.pck_sha256)):
         parser.error("--pck-sha256 requires --pck and a 64-digit hexadecimal digest")
+    if args.binary_sha256 is not None and not re.fullmatch(r"[0-9a-fA-F]{64}", args.binary_sha256):
+        parser.error("--binary-sha256 requires a 64-digit hexadecimal digest")
+    check_binary_digest(args.binary, args.binary_sha256)
     for value in (args.name, args.version, args.release):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+]*", value):
             parser.error("Invalid package name/version/release")
@@ -288,6 +301,7 @@ def main():
         bindir.mkdir(parents=True)
         launcher = bindir / args.name
         shutil.copy2(args.binary, launcher)
+        check_binary_digest(launcher, args.binary_sha256)
         launcher.chmod(0o755)
         # Aurora's validator currently requires DT_RPATH on the main binary.
         # Private DSOs still carry their own DT_RUNPATH=$ORIGIN.
